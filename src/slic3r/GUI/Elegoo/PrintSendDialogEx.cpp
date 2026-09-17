@@ -724,6 +724,17 @@ PrinterNetworkResult<PrintSendDialogEx::ExtendedInfo> PrintSendDialogEx::resolve
         return PrinterNetworkResult<ExtendedInfo>(PrinterNetworkErrorCode::PRINTER_NOT_FOUND, ExtendedInfo{});
     }
 
+    // Before the model test and the tray read: a working printer reports a transient tray
+    // state, which would surface the refusal as a changed tray. Not conditional on
+    // uploadAndPrint - sendPrintFile refuses a busy printer before any bytes move.
+    if (printerNetworkInfo.connectStatus != PRINTER_CONNECT_STATUS_CONNECTED) {
+        return PrinterNetworkResult<ExtendedInfo>(PrinterNetworkErrorCode::PRINTER_CONNECTION_ERROR, ExtendedInfo{});
+    }
+    if (printerNetworkInfo.printerStatus != PRINTER_STATUS_IDLE &&
+        printerNetworkInfo.printerStatus != PRINTER_STATUS_PRINT_COMPLETED) {
+        return PrinterNetworkResult<ExtendedInfo>(PrinterNetworkErrorCode::PRINTER_BUSY, ExtendedInfo{});
+    }
+
     // The dialog blocks these with a confirmation; this is the record of what is printed.
     {
         DynamicPrintConfig cfg        = wxGetApp().preset_bundle->printers.get_edited_preset().config;

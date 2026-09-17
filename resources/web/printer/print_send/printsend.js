@@ -451,6 +451,15 @@ const PrintSendApp = {
                 && printer.printerModel !== this.printInfo.currentProjectPrinterModel;
         },
 
+        // Same rule as the printerBusy computed; a busy printer refuses the upload too,
+        // so this is not conditional on Upload and Print
+        isPrinterBusy(printer) {
+            if (!printer) return false;
+            // Not connected counts as busy
+            if (printer.connectStatus !== 1) return true;
+            return printer.printerStatus !== 0 && printer.printerStatus !== 16;
+        },
+
         // A tray holds usable filament. Same rule as PrinterMmsManager::checkTrayIsReady:
         // loaded or preloaded, and the device reported what is in it.
         isTrayReady(tray) {
@@ -473,10 +482,12 @@ const PrintSendApp = {
         // Skip printers that cannot start printing, with confirmation
         async confirmPartialSend(blocked, remaining) {
             try {
+                // one message per count: vue-i18n pluralises a single count each
                 await DialogHelper.confirm({
-                    title: this.$t('printSend.partialSendTitle'),
-                    message: this.$t('printSend.partialSendDetail', [remaining]) + '<br>' +
-                        blocked.map(item => this.escapeHtml(item)).join('<br>'),
+                    title: this.$t('printSend.partialSendTitle', blocked.length),
+                    message: this.$t('printSend.partialSendSkipped', blocked.length) + '<br>' +
+                        blocked.map(item => this.escapeHtml(item)).join('<br>') + '<br>' +
+                        this.$t('printSend.partialSendRemaining', [remaining], remaining),
                     confirmText: this.$t('printSend.partialSendConfirm'),
                     cancelText: this.$t('printSend.cancel')
                 });
@@ -717,10 +728,22 @@ const PrintSendApp = {
                 return;
             }
 
-            // Skip additional printers that cannot start printing, with confirmation
+            // Skip additional printers that cannot take the job, with confirmation
             let readyPrinterIds = this.additionalPrinterIds.filter(
                 id => id !== this.printInfo.selectedPrinterId);
             const blocked = [];
+
+            // Busy first, so a working printer is named for that rather than for the
+            // transient tray state it reports mid-print
+            readyPrinterIds = readyPrinterIds.filter(id => {
+                const printer = (this.printerList || []).find(p => p.printerId === id);
+                if (this.isPrinterBusy(printer)) {
+                    blocked.push(this.$t('printSend.printerBusyFor', [printer.printerName,
+                        this.getPrinterStatus(printer.printerStatus, printer.connectStatus)]));
+                    return false;
+                }
+                return true;
+            });
 
             if (this.printInfo.uploadAndPrint) {
 

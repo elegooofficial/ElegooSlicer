@@ -63,6 +63,7 @@ const refreshFn = new Function('printerId', 'return (async () => {' + refreshBod
 // upload() decides which additional printers are sent to, so run the real body
 const uploadBody = extract('upload', '');
 const runUpload = new Function('return async function(){' + uploadBody + '}')();
+const isPrinterBusy = new Function('printer', extractSync('isPrinterBusy', 'printer'));
 global.ElLoading = { service: () => ({ close() {} }) };
 
 // A dialog with one additional printer, P2, in whatever state the test needs.
@@ -83,6 +84,7 @@ function makeUploadCtx(p2, uploadAndPrint, entry) {
     captured,
   };
   ctx.$t = (k, a) => k + (a ? '[' + a.join('|') + ']' : '');
+  ctx.isPrinterBusy = isPrinterBusy;
   ctx.isPrinterModelNotMatch = () => false;
   ctx.checkAdditionalFilamentMapping = () => true;
   ctx.checkFilamentMapping = () => true;
@@ -221,6 +223,45 @@ function makeUploadCtx(p2, uploadAndPrint, entry) {
               ' removed entry untouched=' + (removed.filamentList[0] && removed.filamentList[0].userPick === true));
   if (!ok9) fails++;
 
+  // 10. a busy additional printer is dropped and named, not sent
+  const printing = { printerId: 'P2', printerName: 'CC2-2', connectStatus: 1, printerStatus: 1 };
+  uctx = makeUploadCtx(printing, true);
+  await runUpload.call(uctx);
+  let sent = (uctx.captured.payload || {}).additionalPrinters || [];
+  const ok10 = sent.length === 0 && uctx.captured.blocked &&
+               uctx.captured.blocked.length === 1 &&
+               uctx.captured.blocked[0].indexOf('CC2-2') !== -1;
+  console.log((ok10?'PASS':'FAIL') + '  busy printer dropped: sent=' + sent.length +
+              ' blocked=' + JSON.stringify(uctx.captured.blocked));
+  if (!ok10) fails++;
+
+  // 11. and dropped on upload-only too: sendPrintFile refuses the upload itself, so the
+  //     check must not be gated on uploadAndPrint. This is the regression that matters.
+  uctx = makeUploadCtx(printing, false);
+  await runUpload.call(uctx);
+  sent = (uctx.captured.payload || {}).additionalPrinters || [];
+  const ok11 = sent.length === 0 && uctx.captured.blocked && uctx.captured.blocked.length === 1;
+  console.log((ok11?'PASS':'FAIL') + '  busy dropped on upload-only: sent=' + sent.length +
+              ' confirmed=' + !!uctx.captured.blocked);
+  if (!ok11) fails++;
+
+  // 12. print-completed (16) is NOT busy - isBusy accepts it, so the dialog must too
+  uctx = makeUploadCtx({ printerId: 'P2', printerName: 'CC2-2', connectStatus: 1, printerStatus: 16 }, true);
+  await runUpload.call(uctx);
+  sent = (uctx.captured.payload || {}).additionalPrinters || [];
+  const ok12 = sent.length === 1 && sent[0].printerId === 'P2' && uctx.captured.blocked === null;
+  console.log((ok12?'PASS':'FAIL') + '  print-completed still sent: sent=' + sent.length +
+              ' blocked=' + uctx.captured.blocked);
+  if (!ok12) fails++;
+
+  // 13. a disconnected extra is dropped - the non-MMS gap the dialog had no check for
+  uctx = makeUploadCtx({ printerId: 'P2', printerName: 'CC2-2', connectStatus: 0, printerStatus: 0 }, true);
+  await runUpload.call(uctx);
+  sent = (uctx.captured.payload || {}).additionalPrinters || [];
+  const ok13 = sent.length === 0 && uctx.captured.blocked && uctx.captured.blocked.length === 1;
+  console.log((ok13?'PASS':'FAIL') + '  disconnected printer dropped: sent=' + sent.length);
+  if (!ok13) fails++;
+
   // 13b. a model mismatch is refused whatever the post-action, matching the C++ backstop
   for (const uploadAndPrint of [true, false]) {
     uctx = makeUploadCtx({ printerId: 'P2', printerName: 'CC2-2', connectStatus: 1, printerStatus: 0 }, uploadAndPrint);
@@ -271,6 +312,54 @@ function makeUploadCtx(p2, uploadAndPrint, entry) {
   console.log((ok13e?'PASS':'FAIL') + '  offline: not choosable=' + offlineNotAdded +
               ' chosen=' + onlineAdded + ' still removable=' + offlineRemovable);
   if (!ok13e) fails++;
+
+  // 13f. standardizeFilamentType: the fold the tray comparison depends on. The slicer
+  //      under-reports a reinforcement suffix (a PETG-CF preset reports PETG) while the
+  //      printer reports the tray as PETG-CF, so both sides are normalised before
+  //      comparing. "-S" is NOT folded: get_filament_type() adds it to mark support
+  //      material, and folding it would match a support slice to a model-material tray.
+  const stdType = new Function('type', extractSync('standardizeFilamentType', 'type'));
+  const typeCases = [
+    ['PETG',        'PETG',  'plain type unchanged'],
+    ['PETG-CF',     'PETG',  'reinforcement folded'],
+    ['PETG-GF',     'PETG',  'glass fibre folded'],
+    ['PLA-AERO',    'PLA',   'aero folded'],
+    ['PETG-CF10',   'PETG',  'graded fibre folded'],
+    ['UltraPA-CF25','ULTRAPA','graded fibre on a compound base'],
+    ['TPU-95A',     'TPU',   'durometer folded'],
+    ['TPU-64D',     'TPU',   'durometer folded'],
+    ['PLA+',        'PLA',   'trailing plus dropped'],
+    ['PLA-S',       'PLA-S', 'support NOT folded'],
+    ['PA-S',        'PA-S',  'support NOT folded'],
+    ['PAHT-CF',     'PAHT',  'PAHT is not PA'],
+    ['PA6-CF',      'PA6',   'PA6 is not PA'],
+    ['PETG-ESD',    'PETG-ESD','unknown suffix kept'],
+    ['',            '',      'empty'],
+    ['petg-cf',     'PETG',  'case insensitive'],
+  ];
+  const badTypes = typeCases.filter(c => stdType(c[0]) !== c[1]);
+  const ok13f = badTypes.length === 0;
+  console.log((ok13f?'PASS':'FAIL') + '  standardizeFilamentType: ' + typeCases.length + ' cases' +
+              (ok13f ? '' : ' - wrong for ' + badTypes.map(c => c[0]+'->'+stdType(c[0])+' (want '+c[1]+')').join(', ')));
+  if (!ok13f) fails++;
+
+  // 14. isPrinterBusy across every state, including the ones ElegooLink::isBusy
+  //     treats differently (a failed status query is not busy there, busy here)
+  const busyCases = [
+    [{ connectStatus: 1, printerStatus: 0 }, false, 'idle'],
+    [{ connectStatus: 1, printerStatus: 16 }, false, 'print completed'],
+    [{ connectStatus: 1, printerStatus: 1 }, true, 'printing'],
+    [{ connectStatus: 1, printerStatus: 2 }, true, 'paused'],
+    [{ connectStatus: 1, printerStatus: 1001 }, true, 'auth error'],
+    [{ connectStatus: 1, printerStatus: 10000 }, true, 'unknown'],
+    [{ connectStatus: 0, printerStatus: 0 }, true, 'disconnected but idle'],
+    [undefined, false, 'printer not in list'],
+  ];
+  const bad = busyCases.filter(c => isPrinterBusy(c[0]) !== c[1]);
+  const ok14 = bad.length === 0;
+  console.log((ok14?'PASS':'FAIL') + '  isPrinterBusy states' +
+              (ok14 ? '' : ': wrong for ' + bad.map(c => c[2]).join(', ')));
+  if (!ok14) fails++;
 
   console.log(fails ? '\n' + fails + ' FAILURE(S)' : '\nall pass');
   process.exit(fails ? 1 : 0);
