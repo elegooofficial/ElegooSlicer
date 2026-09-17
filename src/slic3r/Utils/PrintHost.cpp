@@ -319,7 +319,12 @@ void PrintHostJobQueue::priv::bg_thread_main()
                 % job.cancelled;
 
             if (! job.cancelled) {
-                perform_job(std::move(job));
+                // do not let one failing job take the queue thread down with the jobs behind it
+                try {
+                    perform_job(std::move(job));
+                } catch (const std::exception &e) {
+                    emit_error(e.what());
+                }
             }
 
             remove_source();
