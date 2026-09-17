@@ -579,7 +579,8 @@ PrinterManagerView::~PrinterManagerView() {
     mPrinterViews.clear();
 }
 
-void PrinterManagerView::openPrinterTab(const std::string& printerId, bool saveState, bool openDeviceAssistant)
+void PrinterManagerView::openPrinterTab(const std::string& printerId, bool saveState, bool openDeviceAssistant,
+                                        bool focusTab)
 {
     const auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
                            std::chrono::system_clock::now().time_since_epoch())
@@ -589,7 +590,9 @@ void PrinterManagerView::openPrinterTab(const std::string& printerId, bool saveS
     if (existingView) {
         int idx = mTabBar->GetPageIndex(existingView);
         if (idx != wxNOT_FOUND) {
-            mTabBar->SetSelection(idx);
+            if (focusTab) {
+                mTabBar->SetSelection(idx);
+            }
             if (openDeviceAssistant) {
                 nlohmann::json data;
                 data["printerId"] = printerId;
@@ -668,7 +671,9 @@ void PrinterManagerView::openPrinterTab(const std::string& printerId, bool saveS
     }else {
         mTabBar->AddPage(view, from_u8(printerInfo.printerName));
     }
-    mTabBar->SetSelection(mTabBar->GetPageCount() - 1);
+    if (focusTab) {
+        mTabBar->SetSelection(mTabBar->GetPageCount() - 1);
+    }
     insertPrinterView(printerId, view);
     Layout();
     

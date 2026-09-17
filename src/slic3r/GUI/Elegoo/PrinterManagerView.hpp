@@ -29,7 +29,12 @@ public:
     PrinterManagerView(wxWindow *parent);
     virtual ~PrinterManagerView();
     void onClose(wxCloseEvent& evt);
-    void openPrinterTab(const std::string& printerId, bool saveState = true, bool openDeviceAssistant = false);
+    // focusTab=false opens (or re-uses) the printer's tab without selecting it. A
+    // multi-printer send opens a tab per target as each upload completes; without this
+    // every completion would steal focus, leaving the operator on whichever machine
+    // happened to finish last rather than the one they chose.
+    void openPrinterTab(const std::string& printerId, bool saveState = true, bool openDeviceAssistant = false,
+                        bool focusTab = true);
     void refreshUserInfo();
     void msw_rescale();
     bool Show(bool show = true) override;

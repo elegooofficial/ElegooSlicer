@@ -4760,6 +4760,8 @@ struct Plater::priv
     }
     void export_gcode(fs::path output_path, bool output_path_on_removable_media);
     void export_gcode(fs::path output_path, bool output_path_on_removable_media, PrintHostJob upload_job);
+    void export_gcode(fs::path output_path, bool output_path_on_removable_media, PrintHostJob upload_job,
+                      std::vector<PrintHostJob> extra_upload_jobs);
 
     void reload_from_disk();
     bool replace_volume_with_stl(int object_idx, int volume_idx, const fs::path& new_path, const std::string& snapshot = "");
@@ -8399,6 +8401,12 @@ void Plater::priv::export_gcode(fs::path output_path, bool output_path_on_remova
 }
 void Plater::priv::export_gcode(fs::path output_path, bool output_path_on_removable_media, PrintHostJob upload_job)
 {
+    export_gcode(std::move(output_path), output_path_on_removable_media, std::move(upload_job), {});
+}
+
+void Plater::priv::export_gcode(fs::path output_path, bool output_path_on_removable_media, PrintHostJob upload_job,
+                                std::vector<PrintHostJob> extra_upload_jobs)
+{
     wxCHECK_RET(!(output_path.empty() && upload_job.empty()), "export_gcode: output_path and upload_job empty");
 
     if (model.objects.empty())
@@ -8422,7 +8430,7 @@ void Plater::priv::export_gcode(fs::path output_path, bool output_path_on_remova
         background_process.schedule_export(output_path.string(), output_path_on_removable_media);
         notification_manager->push_delayed_notification(NotificationType::ExportOngoing, []() {return true; }, 1000, 0);
     } else {
-        background_process.schedule_upload(std::move(upload_job));
+        background_process.schedule_upload(std::move(upload_job), std::move(extra_upload_jobs));
     }
 
     // If the SLA processing of just a single object's supports is running, restart slicing for the whole object.
@@ -16315,6 +16323,8 @@ void Plater::send_gcode_legacy(int plate_idx, Export3mfProgressFn proFn)
         return;
 
     PrintHostJob upload_job(physical_printer_config);
+    // Populated when the send dialog targets more than one printer.
+    std::vector<PrintHostJob> extra_upload_jobs;
     if (upload_job.empty())
         return;
 
@@ -16385,6 +16395,35 @@ void Plater::send_gcode_legacy(int plate_idx, Export3mfProgressFn proFn)
             upload_job.upload_data.upload_path   = pDlg->filename();
             upload_job.upload_data.post_action   = pDlg->getPostAction();
             upload_job.upload_data.extended_info = pDlg->getExtendedInfo();
+
+            // Elegoo: report the printers the send dialog skipped.
+            const auto dropped = pDlg->getDroppedPrinters();
+            if (!dropped.empty()) {
+                wxString names;
+                for (const auto &entry : dropped)
+                    names += (names.IsEmpty() ? "" : "\n") + from_u8(entry.first) + ": " + from_u8(entry.second);
+                // CustomNotification, not PlaterWarning: set_in_preview() hides the latter,
+                // and the send is started from the preview.
+                get_notification_manager()->push_notification(
+                    NotificationType::CustomNotification,
+                    NotificationManager::NotificationLevel::ErrorNotificationLevel,
+                    into_u8(wxString::Format(_L("These printers were skipped: %s"), names)));
+            }
+
+            // Elegoo: one job per additional printer; they share the sliced output but each
+            // carries its own printer id and filament mapping, and PrintHostJob is move-only.
+            for (const auto &extra_info : pDlg->getAdditionalExtendedInfo()) {
+                PrintHostJob extra_job(physical_printer_config);
+                if (extra_job.empty())
+                    continue;
+                // Every target opens its own page; PrintHost reads "primaryTarget" from
+                // extended_info so only the primary is brought to the front.
+                extra_job.switch_to_device_tab      = pDlg->getSwitchToDeviceTab();
+                extra_job.upload_data.upload_path   = pDlg->filename();
+                extra_job.upload_data.post_action   = pDlg->getPostAction();
+                extra_job.upload_data.extended_info = extra_info;
+                extra_upload_jobs.emplace_back(std::move(extra_job));
+            }
         } else {
                     const auto host_type_opt        = physical_printer_config->option<ConfigOptionEnum<PrintHostType>>("host_type");
         const auto host_type            = host_type_opt != nullptr ? host_type_opt->value : htElegooLink;
@@ -16521,7 +16560,7 @@ void Plater::send_gcode_legacy(int plate_idx, Export3mfProgressFn proFn)
 
         upload_job.upload_data.source_path = p->m_print_job_data._3mf_path;    
     }
-    p->export_gcode(fs::path(), false, std::move(upload_job)); 
+    p->export_gcode(fs::path(), false, std::move(upload_job), std::move(extra_upload_jobs));
 }
 int Plater::send_gcode(int plate_idx, Export3mfProgressFn proFn)
 {

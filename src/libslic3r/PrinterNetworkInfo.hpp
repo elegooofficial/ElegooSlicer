@@ -120,6 +120,7 @@ struct PrintFilamentMmsMapping
     float       filamentDensity;
     //print mapping mms filament
     PrinterMmsTray mappedMmsFilament;
+    bool materialOverride{false}; // user accepted a filament type that does not match the slice
 };
 
 struct PrintCapabilities

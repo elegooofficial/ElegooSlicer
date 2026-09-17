@@ -23,6 +23,8 @@ public:
     void saveFilamentMmsMapping(std::vector<PrintFilamentMmsMapping>& printFilamentMmsMapping);
     void removeFilamentMmsMapping(const std::string& filamentType, const std::string& filamentAlias, const std::string& filamentColor);
 
+    static bool checkTrayIsReady(const PrinterMmsTray& tray);
+
 private:
     PrinterMmsManager();
 
@@ -57,8 +59,6 @@ private:
                              const PrinterNetworkInfo& printerNetworkInfo,
                              const std::map<std::string, PrinterPresetInfo>& printerPresetMap,
                              const std::vector<double>& currentProjectNozzleDiameters);
-    
-    bool checkTrayIsReady(const PrinterMmsTray& tray);
 
     void processFilamentsFromBundle(
         const PresetBundle& bundle,
@@ -74,7 +74,6 @@ private:
     PresetFilamentInfo matchFilamentPreset(
         const PrinterMmsTray& tray,
         const std::map<std::string, std::vector<PresetFilamentInfo>>& presetMap);
-
 
     std::mutex mFilamentMmsMappingMutex;
 };

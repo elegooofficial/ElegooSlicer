@@ -297,6 +297,7 @@ nlohmann::json convertPrintFilamentMmsMappingToJson(const PrintFilamentMmsMappin
     json["filamentDensity"]   = printFilamentMmsMapping.filamentDensity;
     json["index"]             = printFilamentMmsMapping.index;
     json["mappedMmsFilament"] = convertPrinterMmsTrayToJson(printFilamentMmsMapping.mappedMmsFilament);
+    json["materialOverride"]  = printFilamentMmsMapping.materialOverride;
     return json;
 }
 
@@ -310,6 +311,7 @@ PrintFilamentMmsMapping convertJsonToPrintFilamentMmsMapping(const nlohmann::jso
         printFilamentMmsMapping.filamentAlias = JsonUtils::safeGetString(json, "filamentAlias", "");
         printFilamentMmsMapping.filamentColor = JsonUtils::safeGetString(json, "filamentColor", "");
         printFilamentMmsMapping.filamentType = JsonUtils::safeGetString(json, "filamentType", "");
+        printFilamentMmsMapping.materialOverride = JsonUtils::safeGetBool(json, "materialOverride", false);
         printFilamentMmsMapping.filamentWeight = JsonUtils::safeGetDouble(json, "filamentWeight", 0.0);
         printFilamentMmsMapping.filamentDensity = JsonUtils::safeGetDouble(json, "filamentDensity", 0.0);
         printFilamentMmsMapping.index = JsonUtils::safeGetInt(json, "index", 0);

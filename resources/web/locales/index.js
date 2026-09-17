@@ -259,7 +259,26 @@ const langMessages = {
       "print": "Print",
       "printerBusyWarning": "The printer may not be able to start transmission/printing. Please select the printer again or refresh its status.",
       "printCompleteWarning": "Please make sure the printer has been cleared out to avoid crashes or damage when starting a new print.",
-      "filamentError":"Failed to retrieve filament information. Please restart the software and the printer, then try again. If the issue persists, please contact customer support."
+      "filamentError":"Failed to retrieve filament information. Check that the printer is online and try the refresh button. If the issue persists, please contact customer support.",
+      "alsoSendTo": "Also Send To",
+      "partialSendTitle": "Some printers cannot start printing",
+      "partialSendDetail": "The following printers will be skipped. Continue sending to the remaining {0} printers?",
+      "partialSendConfirm": "Continue",
+      "printerFilamentUnreadable": "{0}: Failed to retrieve filament information",
+      "printerModelNotMatchFor": "{0}: Printer does not match the gcode file",
+      "printerFilamentsNotMapped": "{0}: Unmapped filament detected",
+      "printerMmsNotConnectedFor": "{0}: Filament system not connected",
+      "filamentTypeNotMatchDetail": "The print is sliced with {0}, but tray {1} is loaded with {2}. It may cause printing failure. Continue?",
+      "filamentTypeNotMatchConfirm": "Continue",
+      "filamentTypeNotMatchHint": "Filament type does not match. Click to use it anyway",
+      "loadingFilament": "Loading filament information...",
+      "noFilamentSystem": "No filament system; the sliced filament settings will be used",
+      "stillLoadingPrinter": "Loading filament information for the selected printers. Please wait...",
+      "refreshFilament": "Reload filament information. Tray selections for this printer will be cleared.",
+      "clickToAlsoSend": "Click to also send to this printer",
+      "clickToRemoveTarget": "Click to stop sending to this printer",
+      "sendTimedOut": "The printer is taking longer than expected to respond. The send may still be in progress — check the print host upload queue.",
+      "sendFailed": "Failed to start the send."
     }
   },
   zh_CN: {
@@ -524,7 +543,26 @@ const langMessages = {
       "print": "打印",
       "printerBusyWarning": "当前打印机可能无法发起任务传输/打印，建议重新选择打印机或者刷新状态",
       "printCompleteWarning": "请检查打印机是否已经清理干净，避免发起新打印时导致撞击或损坏",
-      "filamentError":"获取耗材信息失败，请重启软件和打印机后再次尝试，如未解决问题请寻求客服支持。"
+      "filamentError":"获取耗材信息失败，请确认打印机在线后点击刷新按钮重试，如未解决问题请寻求客服支持。",
+      "alsoSendTo": "同时发送至",
+      "partialSendTitle": "部分打印机无法启动打印",
+      "partialSendDetail": "以下打印机将被跳过，是否继续发送至其余 {0} 台打印机？",
+      "partialSendConfirm": "继续",
+      "printerFilamentUnreadable": "{0}：获取耗材信息失败",
+      "printerModelNotMatchFor": "{0}：打印机与gcode文件不匹配",
+      "printerFilamentsNotMapped": "{0}：存在未映射的耗材",
+      "printerMmsNotConnectedFor": "{0}：耗材系统未连接",
+      "filamentTypeNotMatchDetail": "当前切片使用 {0}，但料槽 {1} 装载的是 {2}，可能会导致打印失败，是否继续？",
+      "filamentTypeNotMatchConfirm": "继续",
+      "filamentTypeNotMatchHint": "耗材类型不匹配，点击后仍可使用",
+      "loadingFilament": "正在获取耗材信息…",
+      "noFilamentSystem": "无耗材系统，将按切片耗材设置打印",
+      "stillLoadingPrinter": "正在获取所选打印机的耗材信息，请稍等",
+      "refreshFilament": "重新获取耗材信息（将清除为该打印机选择的料槽）",
+      "clickToAlsoSend": "点击以同时发送至该打印机",
+      "clickToRemoveTarget": "点击以取消发送至该打印机",
+      "sendTimedOut": "打印机响应超时，发送可能仍在进行中，请查看打印任务上传队列。",
+      "sendFailed": "发送启动失败。"
     }
   }
 };

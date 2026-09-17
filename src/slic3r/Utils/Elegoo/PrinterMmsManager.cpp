@@ -389,6 +389,8 @@ void PrinterMmsManager::getFilamentMmsMapping(std::vector<PrintFilamentMmsMappin
     nlohmann::json mappingJson = loadFilamentMmsMappingFromFile();
     
     for (auto& printFilament : printFilamentMmsMapping) {
+        // only an accepted mapping carries the override forward; a fallback suggestion must not
+        printFilament.materialOverride = false;
         StandardColor standardColor = getStandardColor(printFilament.filamentColor);
         std::string filamentStandardColor = standardColor.colorHex;
         std::string StandardColorName = standardColor.colorName;
@@ -400,6 +402,7 @@ void PrinterMmsManager::getFilamentMmsMapping(std::vector<PrintFilamentMmsMappin
         std::string mmsMappingFilamentType = "";
         std::string mmsMappingFilamentName = "";
         std::string mmsMappingFilamentColor = "";
+        bool mmsMappingMaterialOverride = false;
         bool isMapped = false;
         
         // Check if mapping exists in JSON
@@ -411,6 +414,8 @@ void PrinterMmsManager::getFilamentMmsMapping(std::vector<PrintFilamentMmsMappin
             mmsMappingFilamentType = mapping.value("mappedFilamentType", "");
             mmsMappingFilamentName = mapping.value("mappedFilamentName", "");
             mmsMappingFilamentColor = mapping.value("mappedFilamentColor", "");
+            // the user's earlier acceptance, applied only if a tray holding the same filament is found below
+            mmsMappingMaterialOverride = mapping.value("materialOverride", false);
         }
         if (!mmsMappingFilamentType.empty() && !mmsMappingFilamentName.empty() && !mmsMappingFilamentColor.empty()) {
             for (auto& mms : mmsGroup.mmsList) {
@@ -433,6 +438,7 @@ void PrinterMmsManager::getFilamentMmsMapping(std::vector<PrintFilamentMmsMappin
                         printFilament.mappedMmsFilament.minBedTemp       = tray.minBedTemp;
                         printFilament.mappedMmsFilament.maxBedTemp       = tray.maxBedTemp;
                         printFilament.mappedMmsFilament.status           = tray.status;
+                        printFilament.materialOverride                   = mmsMappingMaterialOverride;
                         isMapped                                         = true;
                         break;
                     }
@@ -546,7 +552,8 @@ void PrinterMmsManager::saveFilamentMmsMapping(std::vector<PrintFilamentMmsMappi
             {"mappedFilamentStandardColor", mappedFilamentStandardColor},
             {"mappedFilamentStandardColorName", mappedStandardColorName},
             {"filamentStandardColor", filamentStandardColor},
-            {"filamentStandardColorName", filamentStandardColorName}
+            {"filamentStandardColorName", filamentStandardColorName},
+            {"materialOverride", printFilament.materialOverride}
         };
     }
     

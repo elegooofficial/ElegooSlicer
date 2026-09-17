@@ -521,14 +521,21 @@ DPIFrame(NULL, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, BORDERLESS_FRAME_
     //BBS
     Bind(EVT_SELECT_TAB, [this](wxCommandEvent&evt) {
         TabPosition pos = (TabPosition)evt.GetInt();
-        m_tabpanel->SetSelection(pos);
-        
         // Handle printerId if provided (stored in event string)
         wxString printerIdStr = evt.GetString();
+        // ExtraLong carries suppression, not focus: an event queued without it reads 0,
+        // which must mean "bring the tab to the front" like every other caller.
+        const bool focusPrinterTab = evt.GetExtraLong() == 0;
+        // Selecting the panel is itself a focus change: an additional printer opens its
+        // page in the background, so it must not pull the operator off the primary.
+        if (focusPrinterTab) {
+            m_tabpanel->SetSelection(pos);
+        }
+
         if (!printerIdStr.IsEmpty() && m_printer_manager_view) {
             // Use CallAfter to ensure SetSelection is complete
-            wxGetApp().CallAfter([this, printerIdStr]() {
-                m_printer_manager_view->openPrinterTab(printerIdStr.ToStdString());
+            wxGetApp().CallAfter([this, printerIdStr, focusPrinterTab]() {
+                m_printer_manager_view->openPrinterTab(printerIdStr.ToStdString(), true, false, focusPrinterTab);
             });
         }
     });
@@ -4281,13 +4288,17 @@ void MainFrame::select_tab(size_t tab/* = size_t(-1)*/)
     select(false);
 }
 
-void MainFrame::request_select_tab(TabPosition pos, const std::string& printerId)
+void MainFrame::request_select_tab(TabPosition pos, const std::string& printerId, bool focusPrinterTab)
 {
     wxCommandEvent* evt = new wxCommandEvent(EVT_SELECT_TAB);
     evt->SetInt(pos);
     if (!printerId.empty()) {
         evt->SetString(wxString::FromUTF8(printerId));
     }
+    // Carried alongside the id: a multi-printer send opens a tab per target, and only the
+    // printer the operator actually selected should end up in front. Non-zero suppresses,
+    // so an event built without this field still focuses.
+    evt->SetExtraLong(focusPrinterTab ? 0 : 1);
     wxQueueEvent(this, evt);
 }
 

@@ -86,6 +86,8 @@ enum class PrinterNetworkErrorCode
     PRINTER_SERIAL_NUMBER_EMPTY = 10012, // Printer serial number empty
     PRINTER_NOT_CONNECTED_TO_UNBIND = 10013, // Printer not connected to unbind
     FILE_TOO_LARGE = 10014, // File too large
+    PRINTER_MMS_TRAY_CHANGED = 10015, // Printer MMS tray changed
+    PRINTER_MODEL_NOT_MATCH = 10016, // Printer model does not match the sliced file
 
     // IPC (Inter-Process Communication) errors (100000-100099)
     IPC_NOT_CONNECTED        = 100000, // IPC connection not established
