@@ -570,7 +570,10 @@ bool ElegooLink::isBusy(const std::string& printerId, PrinterStatus& status, int
     bool isBusy = true;
     status      = PRINTER_STATUS_UNKNOWN;
     for (int i = 0; i < tryCount; i++) {
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+        // wait between polls, not before the first one: an idle printer answers immediately
+        if (i > 0) {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
         auto elinkResult = elink::ElegooLink::getInstance().getPrinterStatus({printerId});
         if (elinkResult.code == elink::ELINK_ERROR_CODE::SUCCESS) {
             const auto& statusData = elinkResult.value();
@@ -663,7 +666,9 @@ PrinterNetworkResult<bool> ElegooLink::sendPrintFile(const PrinterNetworkParams&
   
     try {
         PrinterStatus status;
-        if (isBusy(params.printerId, status, 1)) {
+        // two tries: the first is immediate, the second covers a printer that has not
+        // finished settling. Same tolerance as the single try that used to sleep first.
+        if (isBusy(params.printerId, status, 2)) {
             return PrinterNetworkResult<bool>(PrinterNetworkErrorCode::PRINTER_BUSY, false);
         }
         elink::FileUploadParams uploadParams;
