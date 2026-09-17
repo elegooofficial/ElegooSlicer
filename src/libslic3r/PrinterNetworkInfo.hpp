@@ -332,6 +332,7 @@ struct PrinterNetworkParams
     bool        timeLapse{false};
     bool        heatedBedLeveling{false};
     bool        autoRefill{false};
+    bool        autoRefillSet{false}; // autoRefill was chosen for this printer; false leaves the device setting untouched
     bool        uploadAndStartPrint{false};
     bool        hasMms{false};
     std::vector<PrintFilamentMmsMapping> filamentMmsMappingList;

@@ -610,6 +610,7 @@ nlohmann::json convertPrinterNetworkParamsToJson(const PrinterNetworkParams& par
     json["timeLapse"] = params.timeLapse;
     json["heatedBedLeveling"] = params.heatedBedLeveling;
     json["autoRefill"] = params.autoRefill;
+    json["autoRefillSet"] = params.autoRefillSet;
     json["uploadAndStartPrint"] = params.uploadAndStartPrint;
     json["hasMms"] = params.hasMms;
     nlohmann::json mappingList = nlohmann::json::array();
@@ -630,6 +631,7 @@ PrinterNetworkParams convertJsonToPrinterNetworkParams(const nlohmann::json& jso
     params.timeLapse = JsonUtils::safeGetBool(json, "timeLapse", false);
     params.heatedBedLeveling = JsonUtils::safeGetBool(json, "heatedBedLeveling", false);
     params.autoRefill = JsonUtils::safeGetBool(json, "autoRefill", false);
+    params.autoRefillSet = JsonUtils::safeGetBool(json, "autoRefillSet", false);
     params.uploadAndStartPrint = JsonUtils::safeGetBool(json, "uploadAndStartPrint", false);
     params.hasMms = JsonUtils::safeGetBool(json, "hasMms", false);
     if (json.contains("filamentMmsMappingList") && json["filamentMmsMappingList"].is_array()) {

@@ -461,6 +461,7 @@ void PrintHostJobQueue::priv::perform_job(PrintHostJob the_job)
         }
         if(the_job.upload_data.extended_info.find("autoRefill") != the_job.upload_data.extended_info.end()) {
             params.autoRefill = the_job.upload_data.extended_info["autoRefill"] == "true";
+            params.autoRefillSet = true;
         }
         if(the_job.upload_data.extended_info.find("hasMms") != the_job.upload_data.extended_info.end()) {
             params.hasMms = the_job.upload_data.extended_info["hasMms"] == "true";
