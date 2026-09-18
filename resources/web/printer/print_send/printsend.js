@@ -111,7 +111,7 @@ const PrintSendApp = {
         localPrinters() {
             return this.printerList.filter(printer => printer.networkType === 0);
         },
-        // Every printer except the primary; disconnected ones are listed but not selectable
+        // Every printer except the primary; offline and wrong-model ones are not selectable
         additionalPrinterOptions() {
             if (!this.printerList || this.printerList.length < 2) return [];
             const currentId = this.curPrinter ? this.curPrinter.printerId : null;
@@ -445,10 +445,12 @@ const PrintSendApp = {
             entry.bedType = bedType.value;
         },
 
-        // Check if this printer model does not match the current project printer model
+        // Same rule as resolveAdditionalPrinter: a mismatch only when both sides report a
+        // model, so the dialog is never stricter than the backstop that refuses the send.
         isPrinterModelNotMatch(printer) {
-            return printer && this.printInfo && this.printInfo.currentProjectPrinterModel
-                && printer.printerModel !== this.printInfo.currentProjectPrinterModel;
+            return !!(printer && this.printInfo && this.printInfo.currentProjectPrinterModel
+                && printer.printerModel
+                && printer.printerModel !== this.printInfo.currentProjectPrinterModel);
         },
 
         // Same rule as the printerBusy computed; a busy printer refuses the upload too,
@@ -489,6 +491,22 @@ const PrintSendApp = {
                         blocked.map(item => this.escapeHtml(item)).join('<br>') + '<br>' +
                         this.$t('printSend.partialSendRemaining', [remaining], remaining),
                     confirmText: this.$t('printSend.partialSendConfirm'),
+                    cancelText: this.$t('printSend.cancel')
+                });
+                return true;
+            } catch (e) {
+                return false;
+            }
+        },
+
+        // Confirm the beds of printers that have finished a print are clear
+        async confirmBedsCleared(printers) {
+            try {
+                await DialogHelper.confirm({
+                    title: this.$t('printSend.bedNotClearedTitle', printers.length),
+                    message: this.$t('printSend.bedNotClearedDetail', printers.length) + '<br>' +
+                        printers.map(p => this.escapeHtml(p.printerName)).join('<br>'),
+                    confirmText: this.$t('printSend.bedNotClearedConfirm', printers.length),
                     cancelText: this.$t('printSend.cancel')
                 });
                 return true;
@@ -575,9 +593,9 @@ const PrintSendApp = {
         toggleAdditionalPrinter(printer) {
             if (!printer) return;
             const index = this.additionalPrinterIds.indexOf(printer.printerId);
-            // an offline printer cannot be chosen, but one that goes offline after being
-            // chosen must still be removable
-            if (index === -1 && printer.connectStatus !== 1) return;
+            // an offline or wrong-model printer cannot be chosen, but one already chosen
+            // that later reads as either must still be removable
+            if (index === -1 && (printer.connectStatus !== 1 || this.isPrinterModelNotMatch(printer))) return;
             if (index === -1) {
                 this.additionalPrinterIds.push(printer.printerId);
             } else {
@@ -795,6 +813,18 @@ const PrintSendApp = {
                 const remaining = readyPrinterIds.length + 1; // + the primary
                 const proceed = await this.confirmPartialSend(blocked, remaining);
                 if (!proceed) return;
+            }
+
+            // A printer that has finished still has the last part on its bed. The primary
+            // warns; an extra's card cannot - status 16 is styled the same green as idle.
+            // Asked last, so it only covers printers this send is actually going to.
+            if (this.printInfo.uploadAndPrint) {
+                const occupied = readyPrinterIds
+                    .map(id => (this.printerList || []).find(p => p.printerId === id))
+                    .filter(p => p && p.printerStatus === 16);
+                if (occupied.length > 0 && !await this.confirmBedsCleared(occupied)) {
+                    return;
+                }
             }
 
             if (this.sending) return;

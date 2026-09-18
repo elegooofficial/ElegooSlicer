@@ -68,7 +68,7 @@ global.ElLoading = { service: () => ({ close() {} }) };
 
 // A dialog with one additional printer, P2, in whatever state the test needs.
 function makeUploadCtx(p2, uploadAndPrint, entry) {
-  const captured = { payload: null, blocked: null, tip: null, tips: [] };
+  const captured = { payload: null, blocked: null, tip: null, tips: [], occupied: null };
   const ctx = {
     curPrinter: { printerId: 'P1', printerName: 'CC2-1', connectStatus: 1,
                   systemCapabilities: { supportsMultiFilament: true } },
@@ -92,6 +92,7 @@ function makeUploadCtx(p2, uploadAndPrint, entry) {
   ctx.getAdditionalBedType = () => ({ value: 'btPTE' });
   ctx.showStatusTip = t => { captured.tips.push(t); captured.tip = t; };
   ctx.confirmPartialSend = async blocked => { captured.blocked = blocked; return true; };
+  ctx.confirmBedsCleared = async printers => { captured.occupied = printers; return true; };
   ctx.ipcRequest = async (_name, data, _timeout, quiet) => {
     captured.payload = data;
     captured.quiet = quiet;
@@ -301,7 +302,8 @@ function makeUploadCtx(p2, uploadAndPrint, entry) {
   // 13e. an offline printer cannot be chosen, but one that goes offline after being
   //      chosen must still be removable, or the operator is stuck with it
   const toggle = new Function('printer', extractSync('toggleAdditionalPrinter', 'printer'));
-  const tctx = { additionalPrinterIds: [], syncAdditionalPrinterData() {}, resizeWindow() {} };
+  const tctx = { additionalPrinterIds: [], syncAdditionalPrinterData() {}, resizeWindow() {},
+                 isPrinterModelNotMatch: () => false };
   toggle.call(tctx, { printerId: 'P2', connectStatus: 0 });
   const offlineNotAdded = tctx.additionalPrinterIds.length === 0;
   toggle.call(tctx, { printerId: 'P2', connectStatus: 1 });
@@ -342,6 +344,88 @@ function makeUploadCtx(p2, uploadAndPrint, entry) {
   console.log((ok13f?'PASS':'FAIL') + '  standardizeFilamentType: ' + typeCases.length + ' cases' +
               (ok13f ? '' : ' - wrong for ' + badTypes.map(c => c[0]+'->'+stdType(c[0])+' (want '+c[1]+')').join(', ')));
   if (!ok13f) fails++;
+
+  // 13g. a wrong-model printer cannot be ticked at all - it can never run this gcode,
+  //      so discovering that at Send would waste the operator's mapping work
+  const toggle2 = new Function('printer', extractSync('toggleAdditionalPrinter', 'printer'));
+  const mctx = {
+    additionalPrinterIds: [], syncAdditionalPrinterData() {}, resizeWindow() {},
+    isPrinterModelNotMatch: p => p && p.printerModel === 'Elegoo Neptune 4',
+  };
+  toggle2.call(mctx, { printerId: 'P2', connectStatus: 1, printerModel: 'Elegoo Neptune 4' });
+  const wrongModelBlocked = mctx.additionalPrinterIds.length === 0;
+  toggle2.call(mctx, { printerId: 'P3', connectStatus: 1, printerModel: 'Elegoo Centauri Carbon 2' });
+  const rightModelAdded = mctx.additionalPrinterIds.length === 1;
+  // one already chosen that later reads as wrong-model must still be removable
+  mctx.additionalPrinterIds.push('P4');
+  toggle2.call(mctx, { printerId: 'P4', connectStatus: 1, printerModel: 'Elegoo Neptune 4' });
+  const stillRemovable = !mctx.additionalPrinterIds.includes('P4');
+  const ok13g = wrongModelBlocked && rightModelAdded && stillRemovable;
+  console.log((ok13g?'PASS':'FAIL') + '  wrong model: not choosable=' + wrongModelBlocked +
+              ' same model chosen=' + rightModelAdded + ' still removable=' + stillRemovable);
+  if (!ok13g) fails++;
+
+  // 13h. isPrinterModelNotMatch itself. 13g stubs it, so these cases are invisible there.
+  //      The rule must match resolveAdditionalPrinter: a mismatch only when BOTH sides
+  //      report a model. A dialog stricter than the backstop is a dead end with no override.
+  const modelNotMatch = new Function('printer', extractSync('isPrinterModelNotMatch', 'printer'));
+  const mmCtx = { printInfo: { currentProjectPrinterModel: 'Elegoo Centauri Carbon 2' } };
+  const call = (p, ctx) => modelNotMatch.call(ctx || mmCtx, p);
+  const modelCases = [
+    [{ printerModel: 'Elegoo Centauri Carbon 2' }, false, 'same model'],
+    [{ printerModel: 'Elegoo Neptune 4' },         true,  'different model'],
+    [{ printerModel: '' },                         false, 'printer model empty -> not a proven mismatch'],
+    [{},                                           false, 'printer model absent -> not a proven mismatch'],
+    [undefined,                                    false, 'printer missing from the list'],
+  ];
+  const badModels = modelCases.filter(c => call(c[0]) !== c[1]);
+  // project side empty: nothing to compare against
+  const projectEmpty = call({ printerModel: 'Elegoo Neptune 4' }, { printInfo: { currentProjectPrinterModel: '' } });
+  const noPrintInfo  = call({ printerModel: 'Elegoo Neptune 4' }, { printInfo: null });
+  const ok13h = badModels.length === 0 && projectEmpty === false && noPrintInfo === false;
+  console.log((ok13h?'PASS':'FAIL') + '  isPrinterModelNotMatch: ' + modelCases.length + ' cases + 2 project-side' +
+              (ok13h ? '' : ' - wrong for ' + badModels.map(c => c[2]).join(', ') +
+               ' projectEmpty=' + projectEmpty + ' noPrintInfo=' + noPrintInfo));
+  if (!ok13h) fails++;
+
+  // 13i. a printer that has FINISHED a print still has the part on the bed. The primary
+  //      warns; an extra must too, or the nozzle homes into yesterday's part. Status 16
+  //      is styled the same green as idle, so there is no other cue.
+  uctx = makeUploadCtx({ printerId: 'P2', printerName: 'CC2-2', connectStatus: 1, printerStatus: 16 }, true);
+  await runUpload.call(uctx);
+  sent = (uctx.captured.payload || {}).additionalPrinters || [];
+  const ok13i = uctx.captured.occupied && uctx.captured.occupied.length === 1 && sent.length === 1;
+  console.log((ok13i?'PASS':'FAIL') + '  finished printer prompts before sending: asked=' +
+              !!uctx.captured.occupied + ' sent=' + sent.length);
+  if (!ok13i) fails++;
+
+  // 13j. declining that prompt sends nothing at all
+  uctx = makeUploadCtx({ printerId: 'P2', printerName: 'CC2-2', connectStatus: 1, printerStatus: 16 }, true);
+  uctx.confirmBedsCleared = async () => false;
+  await runUpload.call(uctx);
+  const ok13j = uctx.captured.payload === null;
+  console.log((ok13j?'PASS':'FAIL') + '  declining the bed prompt cancels the send: payload=' +
+              (uctx.captured.payload === null ? 'none' : 'SENT'));
+  if (!ok13j) fails++;
+
+  // 13k. an idle printer is never asked
+  uctx = makeUploadCtx({ printerId: 'P2', printerName: 'CC2-2', connectStatus: 1, printerStatus: 0 }, true);
+  await runUpload.call(uctx);
+  const ok13k = uctx.captured.occupied === null;
+  console.log((ok13k?'PASS':'FAIL') + '  idle printer not prompted: asked=' + !!uctx.captured.occupied);
+  if (!ok13k) fails++;
+
+  // 13l. the bed prompt is asked LAST, about printers actually being sent to. A printer
+  //      that another gate drops must not be asked about: confirming a bed and then being
+  //      told that printer cannot receive the job is the double-prompt the ordering fixes.
+  uctx = makeUploadCtx({ printerId: 'P2', printerName: 'CC2-2', connectStatus: 1, printerStatus: 16 }, true);
+  uctx.checkAdditionalFilamentMapping = () => false;          // dropped for unmapped filament
+  await runUpload.call(uctx);
+  const ok13l = uctx.captured.occupied === null && uctx.captured.blocked
+             && uctx.captured.blocked.length === 1;
+  console.log((ok13l?'PASS':'FAIL') + '  dropped printer not asked about its bed: asked=' +
+              !!uctx.captured.occupied + ' blocked=' + (uctx.captured.blocked || []).length);
+  if (!ok13l) fails++;
 
   // 14. isPrinterBusy across every state, including the ones ElegooLink::isBusy
   //     treats differently (a failed status query is not busy there, busy here)

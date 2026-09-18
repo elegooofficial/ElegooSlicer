@@ -158,7 +158,7 @@
                                 <div class="additional-printer-cards" role="group" aria-labelledby="also-send-to-title">
                                     <div class="additional-printer-card"
                                         v-for="item in additionalPrinterOptions" :key="item.printerId"
-                                        :class="{ 'offline': item.connectStatus !== 1
+                                        :class="{ 'offline': (item.connectStatus !== 1 || isPrinterModelNotMatch(item))
                                                              && !additionalPrinterIds.includes(item.printerId),
                                                   'selected': additionalPrinterIds.includes(item.printerId) }">
 
@@ -178,11 +178,11 @@
                                             <div class="model-container"
                                                 role="checkbox" tabindex="0"
                                                 :aria-checked="additionalPrinterIds.includes(item.printerId)"
-                                                :aria-disabled="item.connectStatus !== 1
+                                                :aria-disabled="(item.connectStatus !== 1 || isPrinterModelNotMatch(item))
                                                                 && !additionalPrinterIds.includes(item.printerId)"
                                                 :title="additionalPrinterIds.includes(item.printerId)
                                                             ? $t('printSend.clickToRemoveTarget')
-                                                            : (item.connectStatus !== 1
+                                                            : (item.connectStatus !== 1 || isPrinterModelNotMatch(item)
                                                                 ? '' : $t('printSend.clickToAlsoSend'))"
                                                 @keydown.space.prevent="toggleAdditionalPrinter(item)">
                                                 <img :src="item.printerImg" class="model-image" alt="" />
@@ -192,6 +192,14 @@
                                                         <span class="model-description">{{ item.networkType===0 ?
                                                             item.host : "SN: " + item.serialNumber }}</span>
                                                         <el-text class="printer-status-current"
+                                                            v-if="isPrinterModelNotMatch(item)"
+                                                            :style="{ color: 'var(--printer-status-error-color)',
+                                                                      backgroundColor: 'var(--printer-status-error-bg)' }"
+                                                            truncated>
+                                                            {{ $t('printSend.printerModelNotMatchShort') }}
+                                                        </el-text>
+                                                        <el-text class="printer-status-current"
+                                                            v-else
                                                             :style="getPrinterStatusStyle(item.printerStatus, item.connectStatus)"
                                                             truncated>
                                                             {{ getPrinterStatus(item.printerStatus, item.connectStatus) }}
