@@ -29,6 +29,12 @@
 #include "slic3r/Utils/Elegoo/PrinterManager.hpp"
 #include "slic3r/Utils/Elegoo/PrinterMmsManager.hpp"
 #include <slic3r/Utils/WebviewIPCManager.h>
+#include <algorithm>
+#include <cctype>
+
+#include <boost/algorithm/string/case_conv.hpp>
+#include <boost/algorithm/string/predicate.hpp>
+#include <boost/algorithm/string/trim.hpp>
 #include <boost/log/trivial.hpp>
 #include <boost/format.hpp>
 
@@ -38,6 +44,78 @@
 using namespace nlohmann;
 
 namespace Slic3r { namespace GUI {
+
+namespace {
+
+// Drops a reinforcement/grade suffix so a PETG slice accepts a PETG-CF tray: the preset
+// reports PETG, the tray reports PETG-CF. Keep in sync with printsend.js.
+std::string standardizeFilamentType(const std::string& type)
+{
+    std::string t = boost::to_upper_copy(type);
+    boost::trim(t);
+    if (t.empty()) {
+        return t;
+    }
+    if (t.back() == '+') { // PLA+ -> PLA
+        t.pop_back();
+        boost::trim(t);
+    }
+    const size_t dash = t.rfind('-');
+    if (dash == std::string::npos || dash == 0 || dash + 1 >= t.size()) {
+        return t;
+    }
+    const std::string suffix = t.substr(dash + 1);
+
+    // "-S" is not folded: get_filament_type() adds it to mark support material (PLA-S),
+    // so folding it would match a support slice to a model-material tray.
+    const bool isReinforcement = suffix == "CF" || suffix == "GF" || suffix == "AERO";
+
+    // Grades: CF25 / GF30 (fibre content) and 95A / 64D (durometer).
+    bool isGrade = false;
+    if ((suffix.size() > 2) && (suffix.compare(0, 2, "CF") == 0 || suffix.compare(0, 2, "GF") == 0)) {
+        isGrade = std::all_of(suffix.begin() + 2, suffix.end(), [](unsigned char c) { return std::isdigit(c) != 0; });
+    } else if (suffix.size() > 1 && (suffix.back() == 'A' || suffix.back() == 'D')) {
+        isGrade = std::all_of(suffix.begin(), suffix.end() - 1, [](unsigned char c) { return std::isdigit(c) != 0; });
+    }
+
+    if (isReinforcement || isGrade) {
+        return t.substr(0, dash);
+    }
+    return t;
+}
+
+// mmsId/trayId are slot positions, not spool identities, so they survive a spool change.
+const PrinterMmsTray* findLiveTray(const PrinterMmsGroup& group, const PrinterMmsTray& pick)
+{
+    for (const auto& mms : group.mmsList) {
+        for (const auto& tray : mms.trayList) {
+            if (tray.mmsId == pick.mmsId && tray.trayId == pick.trayId) {
+                return &tray;
+            }
+        }
+    }
+    return nullptr;
+}
+
+// The slot map carries indices only, so a swapped spool is undetectable downstream.
+bool liveTrayMatchesPick(const PrinterMmsTray& live, const PrinterMmsTray& pick)
+{
+    return boost::iequals(live.filamentType, pick.filamentType) &&
+           boost::iequals(live.filamentName, pick.filamentName) &&
+           boost::iequals(live.filamentColor, pick.filamentColor);
+}
+
+// A tray reporting no type stays usable: unknown is not a proven mismatch.
+bool trayMaterialMatches(const std::string& printFilamentType, const std::string& trayFilamentType)
+{
+    const std::string trayType = standardizeFilamentType(trayFilamentType);
+    if (trayType.empty()) {
+        return true;
+    }
+    return standardizeFilamentType(printFilamentType) == trayType;
+}
+
+} // namespace
 
 PrintSendDialogEx::PrintSendDialogEx(Plater* plater, int printPlateIdx, const boost::filesystem::path& path)
     :  DPIDialog(static_cast<wxWindow*>(wxGetApp().mainframe), wxID_ANY, _L("Send G-code to printer host"))
@@ -65,6 +143,10 @@ PrintSendDialogEx::PrintSendDialogEx(Plater* plater, int printPlateIdx, const bo
 
 PrintSendDialogEx::~PrintSendDialogEx()
 {
+    // First: joining the pool here keeps handlers off the members destroyed below.
+    mIpc.reset();
+    // anything already queued onto the GUI thread now sees an expired token
+    mAlive.reset();
 }
 
 void PrintSendDialogEx::on_dpi_changed(const wxRect &suggested_rect)
@@ -231,9 +313,7 @@ void PrintSendDialogEx::setupIPCHandlers()
     // Handle cancel_print
     mIpc->onEvent("cancel_print", [this](const IPCEvent& event) {
         try {
-            wxGetApp().CallAfter([this]() {
-                onCancel();
-            });
+            callAfterIfAlive([this]() { onCancel(); });
         } catch (const std::exception& e) {
             BOOST_LOG_TRIVIAL(error) << "Error in cancel_print: " << e.what();
         }
@@ -244,9 +324,8 @@ void PrintSendDialogEx::setupIPCHandlers()
         try {
             auto result = onPrint(request.params);
             if (result.code == 0) {
-                wxGetApp().CallAfter([this]() {
-                    EndModal(wxID_OK);
-                });
+                // onPrint is slow enough that the dialog can close before it returns
+                callAfterIfAlive([this]() { EndModal(wxID_OK); });
             } else {
                 sendResponse(result);
             }
@@ -262,17 +341,9 @@ void PrintSendDialogEx::setupIPCHandlers()
     mIpc->onEvent("expand_window", [this](const IPCEvent& event) {
         try {
             bool expand = event.data.value("expand", false);
-            if (!expand) {
-                wxGetApp().CallAfter([this]() {
-                    wxSize pSize = FromDIP(wxSize(860, NO_MMS_HEIGHT));
-                    SetSize(pSize);
-                });
-            } else {
-                wxGetApp().CallAfter([this]() {
-                    wxSize pSize = FromDIP(wxSize(860, HAS_MMS_HEIGHT));
-                    SetSize(pSize);
-                });
-            }
+            callAfterIfAlive([this, expand]() {
+                SetSize(FromDIP(wxSize(860, expand ? HAS_MMS_HEIGHT : NO_MMS_HEIGHT)));
+            });
         } catch (const std::exception& e) {
             BOOST_LOG_TRIVIAL(error) << "Error in expand_window: " << e.what();
         }
@@ -299,6 +370,21 @@ void PrintSendDialogEx::setupIPCHandlers()
         }
     });
 
+    // Tray state for one additional printer; async because it talks to that printer.
+    mIpc->onRequestAsync("request_additional_mms_info", [this](const IPCRequest&                     request,
+                                                               std::function<void(const IPCResult&)> sendResponse) {
+        std::string printerId = request.params.value("printerId", "");
+        try {
+            sendResponse(this->getAdditionalPrinterMmsInfo(printerId));
+        } catch (const std::exception& e) {
+            BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(": error in request_additional_mms_info: %s") % e.what();
+            sendResponse(IPCResult::error(std::string("MMS info request failed: ") + e.what()));
+        } catch (...) {
+            BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << ": unknown error in request_additional_mms_info";
+            sendResponse(IPCResult::error("MMS info request failed: Unknown error"));
+        }
+    });
+
     // Handle request_mms_info (async due to potentially time-consuming getPrinterMmsInfo operation)
     mIpc->onRequestAsync("request_mms_info", [this](const IPCRequest& request,
                                                      std::function<void(const IPCResult&)> sendResponse) {
@@ -317,6 +403,7 @@ void PrintSendDialogEx::setupIPCHandlers()
 }
 IPCResult PrintSendDialogEx::preparePrintTask(const std::string& printerId)
 {
+    std::lock_guard<std::mutex> lock(mIpcMutex);
     nlohmann::json printTask     = json::object();
     auto           preset_bundle = wxGetApp().preset_bundle;
 
@@ -491,6 +578,7 @@ IPCResult PrintSendDialogEx::preparePrintTask(const std::string& printerId)
 
 IPCResult PrintSendDialogEx::getPrinterMmsInfo(const std::string &printerId)
 {
+    std::lock_guard<std::mutex> lock(mIpcMutex);
     IPCResult result;
     mMmsGroup = PrinterMmsGroup();
     PrinterNetworkInfo printerNetworkInfo = PrinterManager::getInstance()->getPrinterNetworkInfo(printerId);
@@ -506,7 +594,7 @@ IPCResult PrintSendDialogEx::getPrinterMmsInfo(const std::string &printerId)
     if (res.isSuccess()) {
         mMmsGroup = res.data.value();
     } else {
-        BOOST_LOG_TRIVIAL(error) << "PrintSendDialogEx::getPrinterMmsInfo: failed to get printer mms info";
+        BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << ": failed to get printer mms info";
         return result;
     }
     nlohmann::json mmsInfo = convertPrinterMmsGroupToJson(mMmsGroup);
@@ -531,6 +619,7 @@ IPCResult PrintSendDialogEx::getPrinterMmsInfo(const std::string &printerId)
 }
 IPCResult PrintSendDialogEx::getPrinterList()
 {
+    std::lock_guard<std::mutex> lock(mIpcMutex);
     IPCResult           result;
     nlohmann::json                  printers    = json::array();
     std::vector<PrinterNetworkInfo> printerList = PrinterManager::getInstance()->getPrinterList();
@@ -563,13 +652,220 @@ IPCResult PrintSendDialogEx::getPrinterList()
     return result;
 }
 
+
+IPCResult PrintSendDialogEx::getAdditionalPrinterMmsInfo(const std::string& printerId)
+{
+    std::lock_guard<std::mutex> lock(mIpcMutex);
+    IPCResult result;
+    result.data                       = json::object();
+    result.data["printerId"]          = printerId;
+    result.data["mmsInfo"]            = json::object();
+    result.data["mappedFilamentList"] = json::array();
+    result.data["hasMms"]             = false;
+
+    PrinterNetworkInfo printerNetworkInfo = PrinterManager::getInstance()->getPrinterNetworkInfo(printerId);
+    if (printerNetworkInfo.printerId.empty()) {
+        result.code    = static_cast<int>(PrinterNetworkErrorCode::PRINTER_NOT_FOUND);
+        result.message = getErrorMessage(PrinterNetworkErrorCode::PRINTER_NOT_FOUND);
+        return result;
+    }
+
+    result.data["printerName"] = printerNetworkInfo.printerName;
+
+    // A printer without an MMS takes the job as sliced; there is nothing to map.
+    if (!printerNetworkInfo.systemCapabilities.supportsMultiFilament) {
+        result.code    = 0;
+        result.message = getErrorMessage(PrinterNetworkErrorCode::SUCCESS);
+        return result;
+    }
+
+    PrinterNetworkResult<PrinterMmsGroup> res = PrinterMmsManager::getInstance()->getPrinterMmsInfo(printerId);
+    if (!res.isSuccess()) {
+        result.code    = static_cast<int>(res.code);
+        result.message = getErrorMessage(res.code);
+        return result;
+    }
+
+    PrinterMmsGroup mmsGroup = res.data.value();
+    bool            hasMms   = !mmsGroup.mmsList.empty() && mmsGroup.connected;
+    result.data["mmsInfo"]   = convertPrinterMmsGroupToJson(mmsGroup);
+    result.data["hasMms"]    = hasMms;
+
+    // Cleared first: a tray assignment only means something on the machine it came from.
+    std::vector<PrintFilamentMmsMapping> filamentList = mPrintFilamentList;
+    for (auto& filament : filamentList) {
+        filament.mappedMmsFilament = PrinterMmsTray();
+        filament.materialOverride  = false;
+    }
+    if (hasMms) {
+        PrinterMmsManager::getInstance()->getFilamentMmsMapping(filamentList, mmsGroup);
+    }
+
+    json mapped = json::array();
+    for (auto& filament : filamentList) {
+        mapped.push_back(convertPrintFilamentMmsMappingToJson(filament));
+    }
+    result.data["mappedFilamentList"] = mapped;
+    result.code                       = 0;
+    result.message                    = getErrorMessage(PrinterNetworkErrorCode::SUCCESS);
+    return result;
+}
+
+PrinterNetworkResult<PrintSendDialogEx::ExtendedInfo> PrintSendDialogEx::resolveAdditionalPrinter(const nlohmann::json& printerEntry,
+                                                                                                  bool uploadAndPrint)
+{
+    std::string printerId = printerEntry.value("printerId", std::string());
+    if (printerId.empty()) {
+        return PrinterNetworkResult<ExtendedInfo>(PrinterNetworkErrorCode::PRINTER_NOT_SELECTED, ExtendedInfo{});
+    }
+
+    PrinterNetworkInfo printerNetworkInfo = PrinterManager::getInstance()->getPrinterNetworkInfo(printerId);
+    if (printerNetworkInfo.printerId.empty()) {
+        return PrinterNetworkResult<ExtendedInfo>(PrinterNetworkErrorCode::PRINTER_NOT_FOUND, ExtendedInfo{});
+    }
+
+    // Before the model test and the tray read: a working printer reports a transient tray
+    // state, which would surface the refusal as a changed tray. Not conditional on
+    // uploadAndPrint - sendPrintFile refuses a busy printer before any bytes move.
+    if (printerNetworkInfo.connectStatus != PRINTER_CONNECT_STATUS_CONNECTED) {
+        return PrinterNetworkResult<ExtendedInfo>(PrinterNetworkErrorCode::PRINTER_CONNECTION_ERROR, ExtendedInfo{});
+    }
+    if (printerNetworkInfo.printerStatus != PRINTER_STATUS_IDLE &&
+        printerNetworkInfo.printerStatus != PRINTER_STATUS_PRINT_COMPLETED) {
+        return PrinterNetworkResult<ExtendedInfo>(PrinterNetworkErrorCode::PRINTER_BUSY, ExtendedInfo{});
+    }
+
+    // The dialog blocks these with a confirmation; this is the record of what is printed.
+    {
+        DynamicPrintConfig cfg        = wxGetApp().preset_bundle->printers.get_edited_preset().config;
+        const auto*        modelValue = cfg.option<ConfigOptionString>("printer_model");
+        const std::string  projectModel = modelValue ? modelValue->value : std::string();
+        if (!projectModel.empty() && !printerNetworkInfo.printerModel.empty() &&
+            printerNetworkInfo.printerModel != projectModel) {
+            return PrinterNetworkResult<ExtendedInfo>(PrinterNetworkErrorCode::PRINTER_MODEL_NOT_MATCH, ExtendedInfo{});
+        }
+    }
+
+    // Established here, not taken from the dialog, which reports a failed read as
+    // hasMms=false. Read only for a print: an upload does not consume the trays.
+    bool            hasMms = false;
+    PrinterMmsGroup mmsGroup;
+    if (uploadAndPrint && printerNetworkInfo.systemCapabilities.supportsMultiFilament) {
+        PrinterNetworkResult<PrinterMmsGroup> res = PrinterMmsManager::getInstance()->getPrinterMmsInfo(printerId);
+        if (!res.isSuccess()) {
+            // Cannot verify the trays, so cannot vouch for what would be printed.
+            return PrinterNetworkResult<ExtendedInfo>(res.code, ExtendedInfo{});
+        }
+        mmsGroup = res.data.value();
+        hasMms   = !mmsGroup.mmsList.empty() && mmsGroup.connected;
+
+        // A multi-filament print needs somewhere to switch.
+        if (!hasMms && uploadAndPrint && mPrintFilamentList.size() > 1) {
+            return PrinterNetworkResult<ExtendedInfo>(PrinterNetworkErrorCode::PRINTER_MMS_NOT_CONNECTED,
+                                                      ExtendedInfo{});
+        }
+    }
+
+    // This print's filaments, with the tray assignments the dialog chose for this printer.
+    std::vector<PrintFilamentMmsMapping> filamentList = mPrintFilamentList;
+    for (auto& filament : filamentList) {
+        filament.mappedMmsFilament = PrinterMmsTray();
+        filament.materialOverride  = false;
+    }
+
+    if (hasMms && printerEntry.contains("filamentList") && printerEntry["filamentList"].is_array()) {
+        for (auto& printFilament : filamentList) {
+            for (const auto& entry : printerEntry["filamentList"]) {
+                if (!entry.contains("index") || entry["index"] != printFilament.index) {
+                    continue;
+                }
+                if (!entry.contains("mappedMmsFilament")) {
+                    break;
+                }
+                printFilament.materialOverride = entry.value("materialOverride", false);
+                const auto& mapped = entry["mappedMmsFilament"];
+                printFilament.mappedMmsFilament.trayName      = mapped.value("trayName", std::string());
+                printFilament.mappedMmsFilament.mmsId         = mapped.value("mmsId", std::string());
+                printFilament.mappedMmsFilament.trayId        = mapped.value("trayId", std::string());
+                printFilament.mappedMmsFilament.filamentColor = mapped.value("filamentColor", std::string());
+                printFilament.mappedMmsFilament.filamentName  = mapped.value("filamentName", std::string());
+                printFilament.mappedMmsFilament.filamentType  = mapped.value("filamentType", std::string());
+                break;
+            }
+        }
+    }
+
+    // An upload does not consume the trays, so an incomplete mapping must not block it.
+    if (hasMms && uploadAndPrint) {
+        for (const auto& filament : filamentList) {
+            if (filament.mappedMmsFilament.trayName.empty() || filament.mappedMmsFilament.mmsId.empty() ||
+                filament.mappedMmsFilament.trayId.empty() || filament.mappedMmsFilament.filamentColor.empty() ||
+                filament.mappedMmsFilament.filamentName.empty() || filament.mappedMmsFilament.filamentType.empty()) {
+                return PrinterNetworkResult<ExtendedInfo>(PrinterNetworkErrorCode::PRINTER_MMS_FILAMENT_NOT_MAPPED, ExtendedInfo{});
+            }
+            // Indices only reach the printer, so a swapped spool must be caught here.
+            const PrinterMmsTray* live = findLiveTray(mmsGroup, filament.mappedMmsFilament);
+            if (live == nullptr || !PrinterMmsManager::checkTrayIsReady(*live) ||
+                !liveTrayMatchesPick(*live, filament.mappedMmsFilament)) {
+                BOOST_LOG_TRIVIAL(warning) << __FUNCTION__
+                                           << boost::format(": tray %s on printer %s no longer holds the selected filament") %
+                                                  filament.mappedMmsFilament.trayName % printerId;
+                return PrinterNetworkResult<ExtendedInfo>(PrinterNetworkErrorCode::PRINTER_MMS_TRAY_CHANGED,
+                                                          ExtendedInfo{});
+            }
+
+            // the dialog already checks this, but the send must not trust a stale selection
+            if (!filament.materialOverride &&
+                !trayMaterialMatches(filament.filamentType, filament.mappedMmsFilament.filamentType)) {
+                return PrinterNetworkResult<ExtendedInfo>(PrinterNetworkErrorCode::PRINTER_MMS_FILAMENT_NOT_MAPPED, ExtendedInfo{});
+            }
+        }
+    }
+
+    nlohmann::json mappedFilaments = json::array();
+    if (hasMms) {
+        for (auto& filament : filamentList) {
+            mappedFilaments.push_back(convertPrintFilamentMmsMappingToJson(filament));
+        }
+    }
+
+    // each additional printer has its own plate; the primary's is used when the entry
+    // carries no recognised bedType
+    int extraBedType = mBedType;
+    {
+        const std::string requested = printerEntry.value("bedType", std::string());
+        if (requested == "btPC") {
+            extraBedType = BedType::btPC;
+        } else if (requested == "btPTE") {
+            extraBedType = BedType::btPTE;
+        }
+    }
+
+    // autoRefill is a persistent device setting, not a job parameter; no per-printer control exists yet
+    ExtendedInfo extendedInfo = {{"bedType", std::to_string(extraBedType)},
+                                 {"timeLapse", mTimeLapse ? "true" : "false"},
+                                 {"heatedBedLeveling", mHeatedBedLeveling ? "true" : "false"},
+                                 {"hasMms", hasMms ? "true" : "false"},
+                                 {"selectedPrinterId", printerId},
+                                 // Names this job's machine in the upload queue; without it
+                                 // every job shows the same host and filename.
+                                 {"printerDisplayName", printerNetworkInfo.printerName},
+                                 // Opens this printer's page without pulling focus from the primary.
+                                 {"primaryTarget", "false"},
+                                 {"filamentAmsMapping", mappedFilaments.dump()}};
+    return PrinterNetworkResult<ExtendedInfo>(PrinterNetworkErrorCode::SUCCESS, std::move(extendedInfo));
+}
+
 IPCResult PrintSendDialogEx::onPrint(const nlohmann::json& printInfo)
 {
+    std::lock_guard<std::mutex> lock(mIpcMutex);
     IPCResult result;
     result.data                       = nlohmann::json::object();
     PrinterNetworkErrorCode errorCode = PrinterNetworkErrorCode::SUCCESS;
     try {
         mSelectedPrinterId     = "";
+        mAdditionalExtendedInfo.clear();
+        mDroppedPrinters.clear();
         mTimeLapse             = printInfo["timeLapse"].get<bool>();
         mHeatedBedLeveling     = printInfo["heatedBedLeveling"].get<bool>();
         mAutoRefill            = printInfo["autoRefill"].get<bool>();
@@ -608,6 +904,7 @@ IPCResult PrintSendDialogEx::onPrint(const nlohmann::json& printInfo)
                     nlohmann::json mappedFilament = printInfo["filamentList"][i]["mappedMmsFilament"];
                     // update printFilament with mappedFilament
                     if (printInfo["filamentList"][i]["index"] == printFilament.index) {
+                        printFilament.materialOverride = printInfo["filamentList"][i].value("materialOverride", false);
                         printFilament.mappedMmsFilament.trayName      = mappedFilament["trayName"];
                         printFilament.mappedMmsFilament.mmsId         = mappedFilament["mmsId"];
                         printFilament.mappedMmsFilament.trayId        = mappedFilament["trayId"];
@@ -618,6 +915,29 @@ IPCResult PrintSendDialogEx::onPrint(const nlohmann::json& printInfo)
                     }
                 }
             }
+            // Re-read: the mapping came from an earlier read. Queried through
+            // PrinterManager directly; the wrapper would rebuild the preset map for nothing.
+            PrinterMmsGroup primaryMmsGroup;
+            {
+                PrinterNetworkResult<PrinterMmsGroup> res =
+                    PrinterManager::getInstance()->getPrinterMmsInfo(mSelectedPrinterId);
+                if (!res.isSuccess()) {
+                    errorCode      = res.code;
+                    result.message = getErrorMessage(errorCode);
+                    result.code    = static_cast<int>(errorCode);
+                    return result;
+                }
+                primaryMmsGroup = res.data.value();
+                // mHasMms is left alone: clearing it would skip this block on the retry
+                // and send an empty slot map.
+                if (primaryMmsGroup.mmsList.empty() || !primaryMmsGroup.connected) {
+                    errorCode      = PrinterNetworkErrorCode::PRINTER_MMS_NOT_CONNECTED;
+                    result.message = getErrorMessage(errorCode);
+                    result.code    = static_cast<int>(errorCode);
+                    return result;
+                }
+            }
+
             for (auto& printFilament : mPrintFilamentList) {
                 if (printFilament.mappedMmsFilament.trayName.empty() || printFilament.mappedMmsFilament.mmsId.empty() ||
                     printFilament.mappedMmsFilament.trayId.empty() || printFilament.mappedMmsFilament.filamentColor.empty() ||
@@ -627,8 +947,56 @@ IPCResult PrintSendDialogEx::onPrint(const nlohmann::json& printInfo)
                     result.code = static_cast<int>(errorCode);
                     return result;
                 }
+                // Same live-tray check as resolveAdditionalPrinter.
+                const PrinterMmsTray* live = findLiveTray(primaryMmsGroup, printFilament.mappedMmsFilament);
+                if (live == nullptr || !PrinterMmsManager::checkTrayIsReady(*live) ||
+                    !liveTrayMatchesPick(*live, printFilament.mappedMmsFilament)) {
+                    BOOST_LOG_TRIVIAL(warning) << __FUNCTION__
+                                               << boost::format(": tray %s no longer holds the selected filament") %
+                                                      printFilament.mappedMmsFilament.trayName;
+                    errorCode      = PrinterNetworkErrorCode::PRINTER_MMS_TRAY_CHANGED;
+                    result.message = getErrorMessage(errorCode);
+                    result.code    = static_cast<int>(errorCode);
+                    return result;
+                }
+
+                // Same material check as resolveAdditionalPrinter.
+                if (!printFilament.materialOverride &&
+                    !trayMaterialMatches(printFilament.filamentType, printFilament.mappedMmsFilament.filamentType)) {
+                    errorCode      = PrinterNetworkErrorCode::PRINTER_MMS_FILAMENT_NOT_MAPPED;
+                    result.message = getErrorMessage(errorCode);
+                    result.code = static_cast<int>(errorCode);
+                    return result;
+                }
             }
             PrinterMmsManager::getInstance()->saveFilamentMmsMapping(mPrintFilamentList);
+        }
+
+        // Backstop for the dialog's per-printer checks; names the printer that failed.
+        if (printInfo.contains("additionalPrinters") && printInfo["additionalPrinters"].is_array()) {
+            for (const auto& entry : printInfo["additionalPrinters"]) {
+                if (!entry.is_object()) {
+                    continue;
+                }
+                std::string extraPrinterId = entry.value("printerId", std::string());
+                if (extraPrinterId.empty() || extraPrinterId == mSelectedPrinterId) {
+                    continue;
+                }
+
+                // dropped, not the whole send; the skipped printers are reported after
+                auto extraRes = resolveAdditionalPrinter(entry, uploadAndPrint);
+                if (!extraRes.isSuccess()) {
+                    PrinterNetworkInfo failedPrinter = PrinterManager::getInstance()->getPrinterNetworkInfo(extraPrinterId);
+                    BOOST_LOG_TRIVIAL(warning) << __FUNCTION__
+                                               << boost::format(": skipping printer %s: %s") % extraPrinterId %
+                                                      getErrorMessage(extraRes.code);
+                    const std::string droppedName = failedPrinter.printerName.empty() ? extraPrinterId
+                                                                                     : failedPrinter.printerName;
+                    mDroppedPrinters.emplace_back(droppedName, extraRes.message);
+                    continue;
+                }
+                mAdditionalExtendedInfo.push_back(std::move(extraRes.data.value()));
+            }
         }
     } catch (std::exception& e) {
         BOOST_LOG_TRIVIAL(error) << "Print Error: " << e.what();
@@ -656,8 +1024,22 @@ void PrintSendDialogEx::EndModal(int ret)
     DPIDialog::EndModal(ret);
 }
 
-std::map<std::string, std::string> PrintSendDialogEx::getExtendedInfo() const
+std::vector<PrintSendDialogEx::ExtendedInfo> PrintSendDialogEx::getAdditionalExtendedInfo() const
 {
+    std::lock_guard<std::mutex> lock(mIpcMutex);
+    return mAdditionalExtendedInfo;
+}
+
+std::vector<std::pair<std::string, std::string>> PrintSendDialogEx::getDroppedPrinters() const
+{
+    std::lock_guard<std::mutex> lock(mIpcMutex);
+    return mDroppedPrinters;
+}
+
+PrintSendDialogEx::ExtendedInfo PrintSendDialogEx::getExtendedInfo() const
+{
+    // read on the GUI thread after ShowModal returns, while a late handler may still run
+    std::lock_guard<std::mutex> lock(mIpcMutex);
     nlohmann::json filamentList = json::array();
     if (mHasMms) {
         for (auto& filament : mPrintFilamentList) {
@@ -665,13 +1047,23 @@ std::map<std::string, std::string> PrintSendDialogEx::getExtendedInfo() const
         }
     }
 
-    return {{"bedType", std::to_string(mBedType)},
-            {"timeLapse", mTimeLapse ? "true" : "false"},
-            {"heatedBedLeveling", mHeatedBedLeveling ? "true" : "false"},
-            {"autoRefill", mAutoRefill ? "true" : "false"}, 
-            {"hasMms", mHasMms ? "true" : "false"}, 
-            {"selectedPrinterId", mSelectedPrinterId},
-            {"filamentAmsMapping", filamentList.dump()}};
+    // Names this job's machine in the upload queue; see resolveAdditionalPrinter.
+    const PrinterNetworkInfo primaryInfo =
+        PrinterManager::getInstance()->getPrinterNetworkInfo(mSelectedPrinterId);
+
+    ExtendedInfo info = {{"bedType", std::to_string(mBedType)},
+                         {"timeLapse", mTimeLapse ? "true" : "false"},
+                         {"heatedBedLeveling", mHeatedBedLeveling ? "true" : "false"},
+                         {"hasMms", mHasMms ? "true" : "false"},
+                         {"selectedPrinterId", mSelectedPrinterId},
+                         {"printerDisplayName", primaryInfo.printerName},
+                         {"filamentAmsMapping", filamentList.dump()}};
+
+    // autoRefill persists on the printer; only send it when the toggle was shown (supportsAutoRefill)
+    if (primaryInfo.printCapabilities.supportsAutoRefill) {
+        info["autoRefill"] = mAutoRefill ? "true" : "false";
+    }
+    return info;
 }
 
 PrintHostPostUploadAction PrintSendDialogEx::getPostAction() const
@@ -701,6 +1093,7 @@ void PrintSendDialogEx::OnCloseWindow(wxCloseEvent& event)
 
 BedType PrintSendDialogEx::getCurrentBedType() const
 {
+    std::lock_guard<std::mutex> lock(mIpcMutex);
     std::string str_bed_type = wxGetApp().app_config->get("curr_bed_type");
     int         bedType      = atoi(str_bed_type.c_str());
     return static_cast<BedType>(bedType);

@@ -48,7 +48,6 @@
   flex-shrink: 0;
 }
 
-
 /* ===== MODEL NAME ===== */
 .model-name-edit {
   display: flex;
@@ -202,8 +201,6 @@
 .printsend-printer-dropdown .el-scrollbar__wrap {
   max-height: 360px;
 }
-
-
 
 .printer-option {
   height: fit-content;
@@ -720,7 +717,6 @@
   font-size: 16px;
 }
 
-
 .error-tips{
   color: var(--color-error);
   font-size: 16px;
@@ -734,4 +730,130 @@
 .el-select-group__title {
   font-size: 16px;
   font-weight: 500;
+}
+
+/* ===== ADDITIONAL PRINTERS ===== */
+.additional-printers {
+  margin-top: 12px;
+}
+
+.additional-printers-title {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.additional-printer-mapping {
+  margin-top: 14px;
+}
+
+.additional-printer-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.additional-printer-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 260px;
+}
+
+.additional-printer-rule {
+  flex: 1;
+  height: 1px;
+  background: var(--border-primary);
+}
+
+.additional-printer-note {
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 4px 0 2px;
+}
+
+.additional-printer-note.error {
+  color: var(--color-error);
+}
+
+.tray-popover-card.type-not-match {
+  opacity: 0.55;
+  outline: 1px dashed var(--text-secondary);
+  outline-offset: -3px;
+}
+
+.tray-popover-card.type-not-match:hover {
+  opacity: 0.85;
+}
+
+.additional-printer-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.additional-printer-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Framing for an additional printer, sized to sit beside the bed select */
+.additional-printer-frame {
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.15s, border-color 0.15s;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border-primary);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+}
+
+/* .icon-button was written for a span; reset the button defaults */
+.additional-printer-refresh {
+  flex: none;
+  border: 0;
+  background: none;
+  margin-right: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+.additional-printer-refresh:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.additional-printer-refresh:disabled:hover {
+  background: none;
+}
+
+/* Dimmed when not chosen, accent border when chosen */
+.additional-printer-frame:hover {
+  opacity: 0.85;
+}
+
+.additional-printer-frame .model-container:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+.additional-printer-card.selected .additional-printer-frame {
+  opacity: 1;
+  border-color: var(--color-primary);
+}
+
+.additional-printer-card.offline .additional-printer-frame {
+  opacity: 0.4;
+  cursor: not-allowed;
 }

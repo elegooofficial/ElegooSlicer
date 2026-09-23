@@ -389,6 +389,9 @@ void PrinterMmsManager::getFilamentMmsMapping(std::vector<PrintFilamentMmsMappin
     nlohmann::json mappingJson = loadFilamentMmsMappingFromFile();
     
     for (auto& printFilament : printFilamentMmsMapping) {
+        // A material override is a decision about one send, not a standing permission: it is
+        // never saved or restored, so a mismatched tray always asks again.
+        printFilament.materialOverride = false;
         StandardColor standardColor = getStandardColor(printFilament.filamentColor);
         std::string filamentStandardColor = standardColor.colorHex;
         std::string StandardColorName = standardColor.colorName;

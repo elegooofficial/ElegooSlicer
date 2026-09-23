@@ -2,6 +2,7 @@
 #define slic3r_GUI_BackgroundSlicingProcess_hpp_
 
 #include <string>
+#include <vector>
 #include <condition_variable>
 #include <mutex>
 
@@ -153,6 +154,8 @@ public:
 	// Set print host upload job data to be enqueued to the PrintHostJobQueue
 	// after current print slicing is complete
 	void schedule_upload(Slic3r::PrintHostJob upload_job);
+	// Elegoo: upload the same sliced output to several printers; each extra job gets its own copy of the file.
+	void schedule_upload(Slic3r::PrintHostJob upload_job, std::vector<Slic3r::PrintHostJob> extra_upload_jobs);
 	// Clear m_export_path.
 	void reset_export();
 	// Once the G-code export is scheduled, the apply() methods will do nothing.
@@ -248,6 +251,7 @@ private:
 	// Print host upload job to schedule after slicing is complete, used by schedule_upload(),
 	// empty by default (ie. no upload to schedule)
 	PrintHostJob                m_upload_job;
+	std::vector<PrintHostJob>   m_extra_upload_jobs; // additional printers for the same send, empty for a single upload
 	// Thread, on which the background processing is executed. The thread will always be present
 	// and ready to execute the slicing process.
 	boost::thread		 		m_thread;

@@ -80,6 +80,10 @@ std::string getErrorMessage(PrinterNetworkErrorCode error)
             return _u8L("Printer not selected. Please try again.");
         case PrinterNetworkErrorCode::PRINTER_MMS_FILAMENT_NOT_MAPPED:
             return _u8L("Unmapped filament detected, printing cannot be started.");
+        case PrinterNetworkErrorCode::PRINTER_MMS_TRAY_CHANGED:
+            return _u8L("Printer MMS filament has changed. Please refresh and select it again.");
+        case PrinterNetworkErrorCode::PRINTER_MODEL_NOT_MATCH:
+            return _u8L("The printer does not match the sliced file.");
         case PrinterNetworkErrorCode::PRINTER_HOST_NOT_MATCH:
             return _u8L("The IP address does not match the printer's information. Please remove the printer and add it again.");
         case PrinterNetworkErrorCode::PRINTER_OFFLINE:

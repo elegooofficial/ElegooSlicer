@@ -16,6 +16,7 @@
     <script src="../../data/text.js"></script>
     <script src="../../locales/index.js"></script>
     <script type="text/javascript" src="../../utils/util.js"></script>
+    <script type="text/javascript" src="../../utils/dialog-helper.js"></script>
     <script src="../../utils/ipc.js"></script>
     <script src="../printer-status-utils.js"></script>
     <script src="./img/filament.js"></script>
@@ -151,6 +152,93 @@
                                     </el-option>
                                 </el-select>
                             </div>
+
+                            <div class="additional-printers" v-if="additionalPrinterOptions.length > 0">
+                                <span id="also-send-to-title" class="additional-printers-title">{{ $t('printSend.alsoSendTo') }}</span>
+                                <div class="additional-printer-cards" role="group" aria-labelledby="also-send-to-title">
+                                    <div class="additional-printer-card"
+                                        v-for="item in additionalPrinterOptions" :key="item.printerId"
+                                        :class="{ 'offline': (item.connectStatus !== 1 || isPrinterModelNotMatch(item))
+                                                             && !additionalPrinterIds.includes(item.printerId),
+                                                  'selected': additionalPrinterIds.includes(item.printerId) }">
+
+                                        <div class="additional-printer-frame"
+                                            @click="toggleAdditionalPrinter(item)">
+
+                                            <button type="button" class="icon-button additional-printer-refresh"
+                                                v-if="additionalPrinterIds.includes(item.printerId)"
+                                                :disabled="additionalPrinterData[item.printerId] &&
+                                                           additionalPrinterData[item.printerId].loading"
+                                                :title="$t('printSend.refreshFilament')"
+                                                :aria-label="$t('printSend.refreshFilament')"
+                                                @click.stop="refreshAdditionalPrinter(item.printerId)">
+                                                <img width="18" src="img/refresh.svg" alt="" />
+                                            </button>
+
+                                            <div class="model-container"
+                                                role="checkbox" tabindex="0"
+                                                :aria-checked="additionalPrinterIds.includes(item.printerId)"
+                                                :aria-disabled="(item.connectStatus !== 1 || isPrinterModelNotMatch(item))
+                                                                && !additionalPrinterIds.includes(item.printerId)"
+                                                :title="additionalPrinterIds.includes(item.printerId)
+                                                            ? $t('printSend.clickToRemoveTarget')
+                                                            : (item.connectStatus !== 1 || isPrinterModelNotMatch(item)
+                                                                ? '' : $t('printSend.clickToAlsoSend'))"
+                                                @keydown.space.prevent="toggleAdditionalPrinter(item)">
+                                                <img :src="item.printerImg" class="model-image" alt="" />
+                                                <div class="model-details">
+                                                    <span class="model-title" :title="item.printerName">{{ item.printerName }}</span>
+                                                    <div class="model-description-row">
+                                                        <span class="model-description">{{ item.networkType===0 ?
+                                                            item.host : "SN: " + item.serialNumber }}</span>
+                                                        <el-text class="printer-status-current"
+                                                            v-if="isPrinterModelNotMatch(item)"
+                                                            :style="{ color: 'var(--printer-status-error-color)',
+                                                                      backgroundColor: 'var(--printer-status-error-bg)' }"
+                                                            truncated>
+                                                            {{ $t('printSend.printerModelNotMatchShort') }}
+                                                        </el-text>
+                                                        <el-text class="printer-status-current"
+                                                            v-else
+                                                            :style="getPrinterStatusStyle(item.printerStatus, item.connectStatus)"
+                                                            truncated>
+                                                            {{ getPrinterStatus(item.printerStatus, item.connectStatus) }}
+                                                        </el-text>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <el-select v-if="additionalPrinterIds.includes(item.printerId)
+                                                         && item.printCapabilities
+                                                         && item.printCapabilities.supportsHeatedBedSwitching"
+                                            class="bed-select"
+                                            :class="{ hidden: !showBedDropdown }"
+                                            :model-value="getAdditionalBedType(item.printerId)"
+                                            :show-arrow="false" :suffix-icon="null"
+                                            value-key="value"
+                                            @change="setAdditionalBedType(item.printerId, $event)">
+                                            <template #label="{ value }">
+                                                <div class="bed-container">
+                                                    <el-tooltip :content="value.name" placement="top">
+                                                        <img :src="value.icon" class="bed-image"
+                                                            style="width: 80px; height: 80px;" alt="bed" />
+                                                    </el-tooltip>
+                                                </div>
+                                            </template>
+                                            <el-option v-for="bedType in bedTypes" class="bed-option"
+                                                :key="bedType.value" :value="bedType">
+                                                <div class="bed-container">
+                                                    <img :src="bedType.icon" class="bed-image" alt="bed" />
+                                                    <div class="bed-info">
+                                                        <span class="bed-title">{{ bedType.name }}</span>
+                                                    </div>
+                                                </div>
+                                            </el-option>
+                                        </el-select>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </section>
@@ -246,9 +334,10 @@
                                                     <div class="tray-popover-content">
                                                         <div v-for="tray in mms.trayList" :key="tray.trayName"
                                                             class="tray-popover-card"
-                                                            :class="{ 'disabled': tray.status === 0 || tray.status === 2 }"
+                                                            :class="{ 'disabled': !isTrayReady(tray), 'type-not-match': isTrayTypeNotMatch(filament, tray) }"
                                                             :style="getMmsCardStyle(tray)"
-                                                            @click="tray.status === 1 || tray.status === 3 ? updateFilamentMapping(filament.index, tray) : null">
+                                                            :title="isTrayTypeNotMatch(filament, tray) ? $t('printSend.filamentTypeNotMatchHint') : ''"
+                                                            @click="isTrayReady(tray) ? updateFilamentMapping(filament.index, tray) : null">
                                                             <div class="tray-name">{{ tray.trayName }}</div>
                                                             <div class="tray-dash"></div>
                                                             <div class="tray-filament-type">{{(tray.status === 1 ||
@@ -278,6 +367,90 @@
                                 <!-- <div class="tray-filament-type">{{ filament.amsFilamentType || 'N/A' }}</div> -->
 
                             </div>
+                        </div>
+                    </div>
+                </section>
+                <section class="filament-section" v-if="showAdditionalPrinterMapping">
+                    <div class="section-header">
+                        <h3 class="section-title">{{ $t('printSend.alsoSendTo') }}</h3>
+                        <div class="section-separator"></div>
+                    </div>
+                    <div class="filament-container">
+                        <div class="additional-printer-mapping"
+                            v-for="printerId in additionalPrinterIds" :key="printerId">
+                            <template v-if="additionalPrinterData[printerId]">
+                                <div class="additional-printer-header">
+                                    <span class="additional-printer-name">
+                                        {{ additionalPrinterData[printerId].printerName }}
+                                    </span>
+                                    <div class="additional-printer-rule"></div>
+                                </div>
+
+                                <div class="additional-printer-note" v-if="additionalPrinterData[printerId].loading">
+                                    {{ $t('printSend.loadingFilament') }}
+                                </div>
+                                <div class="additional-printer-note error" v-else-if="additionalPrinterData[printerId].error">
+                                    {{ additionalPrinterData[printerId].error }}
+                                </div>
+                                <div class="additional-printer-note" v-else-if="!additionalPrinterData[printerId].hasMms">
+                                    {{ $t('printSend.noFilamentSystem') }}
+                                </div>
+
+                                <div class="filament-list" v-else>
+                                    <div v-for="filament in additionalPrinterData[printerId].filamentList"
+                                        :key="printerId + '-' + filament.index" class="mapping-container">
+                                        <div class="filament-rect" :style="getFilamentStyle(filament)"
+                                            :title="filament.filamentName">
+                                            <div class="filament-type">{{ filament.filamentType }}</div>
+                                            <div class="filament-weight">{{ formatWeight(filament.filamentWeight) }}</div>
+                                        </div>
+
+                                        <el-popover placement="top" title="" :width="420" trigger="click"
+                                            :show-arrow="false">
+                                            <template #default>
+                                                <div>
+                                                    <div class="mms-header">
+                                                        <span class="mms-title">
+                                                            {{ $t(additionalPrinterData[printerId].mmsInfo.mmsSystemName) }}
+                                                        </span>
+                                                        <div style="border-bottom: 1px solid var(--border-primary); height: 1px; flex: 1;">
+                                                        </div>
+                                                    </div>
+                                                    <div class="mms-popover-content">
+                                                        <div v-for="mms in additionalPrinterData[printerId].mmsInfo.mmsList"
+                                                            :key="mms.mmsId" class="mms-row">
+                                                            <div class="tray-popover-content">
+                                                                <div v-for="tray in mms.trayList" :key="tray.trayName"
+                                                                    class="tray-popover-card"
+                                                                    :class="{ 'disabled': !isTrayReady(tray), 'type-not-match': isTrayTypeNotMatch(filament, tray) }"
+                                                                    :style="getMmsCardStyle(tray)"
+                                                                    :title="isTrayTypeNotMatch(filament, tray) ? $t('printSend.filamentTypeNotMatchHint') : ''"
+                                                                    @click="isTrayReady(tray) ? updateAdditionalFilamentMapping(printerId, filament.index, tray) : null">
+                                                                    <div class="tray-name">{{ tray.trayName }}</div>
+                                                                    <div class="tray-dash"></div>
+                                                                    <div class="tray-filament-type">{{ (tray.status === 1 ||
+                                                                        tray.status === 3) ? tray.filamentType : (tray.status
+                                                                        === 0 ? '/' : "?") }}</div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </template>
+                                            <template #reference>
+                                                <div class="tray-rect"
+                                                    :title="(filament.mappedMmsFilament && filament.mappedMmsFilament.filamentName) || ''">
+                                                    <span v-html="getFilamentSvg(filament.mappedMmsFilament)"></span>
+                                                    <div class="tray-filament-type">{{ (filament.mappedMmsFilament &&
+                                                        filament.mappedMmsFilament.filamentType) || '?' }}
+                                                    </div>
+                                                    <span><img src="./img/down-arrow.svg" alt="" /></span>
+                                                </div>
+                                            </template>
+                                        </el-popover>
+                                    </div>
+                                </div>
+                            </template>
                         </div>
                     </div>
                 </section>
@@ -320,7 +493,7 @@
             <footer class="action-buttons">
                 <button class="btn btn-secondary trans" @click="cancel" tid="cancel">{{ $t('printSend.cancel')
                     }}</button>
-                <button class="btn btn-primary trans" :disabled="!curPrinter" @click="upload" tid="upload">{{
+                <button class="btn btn-primary trans" :disabled="!curPrinter || sending" @click="upload" tid="upload">{{
                     printInfo.uploadAndPrint ? $t('printSend.print') : $t('printSend.upload') }}</button>
             </footer>
         </div>

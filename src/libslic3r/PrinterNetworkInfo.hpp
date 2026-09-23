@@ -120,6 +120,7 @@ struct PrintFilamentMmsMapping
     float       filamentDensity;
     //print mapping mms filament
     PrinterMmsTray mappedMmsFilament;
+    bool materialOverride{false}; // user accepted a filament type that does not match the slice
 };
 
 struct PrintCapabilities
@@ -332,6 +333,7 @@ struct PrinterNetworkParams
     bool        timeLapse{false};
     bool        heatedBedLeveling{false};
     bool        autoRefill{false};
+    bool        autoRefillSet{false}; // autoRefill was chosen for this printer; false leaves the device setting untouched
     bool        uploadAndStartPrint{false};
     bool        hasMms{false};
     std::vector<PrintFilamentMmsMapping> filamentMmsMappingList;

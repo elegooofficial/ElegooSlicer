@@ -737,6 +737,11 @@ void BackgroundSlicingProcess::schedule_export(const std::string &path, bool exp
 
 void BackgroundSlicingProcess::schedule_upload(Slic3r::PrintHostJob upload_job)
 {
+	this->schedule_upload(std::move(upload_job), {});
+}
+
+void BackgroundSlicingProcess::schedule_upload(Slic3r::PrintHostJob upload_job, std::vector<Slic3r::PrintHostJob> extra_upload_jobs)
+{
 	assert(m_export_path.empty());
 	if (! m_export_path.empty())
 		return;
@@ -745,7 +750,8 @@ void BackgroundSlicingProcess::schedule_upload(Slic3r::PrintHostJob upload_job)
 	std::scoped_lock<std::mutex> lock(m_print->state_mutex());
 	this->invalidate_step(bspsGCodeFinalize);
 	m_export_path.clear();
-	m_upload_job = std::move(upload_job);
+	m_upload_job        = std::move(upload_job);
+	m_extra_upload_jobs = std::move(extra_upload_jobs);
 }
 
 void BackgroundSlicingProcess::reset_export()
@@ -951,9 +957,46 @@ void BackgroundSlicingProcess::prepare_upload()
 
     m_print->set_status(100, (boost::format(_utf8(L("Scheduling upload to `%1%`. See Window -> Print Host Upload Queue"))) % m_upload_job.printhost->get_host()).str());
 
-	m_upload_job.upload_data.source_path = std::move(source_path);
+	m_upload_job.upload_data.source_path = source_path;
 
+	// Elegoo: each queued job owns its source file (the queue deletes it on completion),
+	// so every additional printer gets its own copy. Copy before enqueueing anything: the
+	// queue thread may finish the first job before the loop below is done.
+	std::vector<PrintHostJob> extra_jobs = std::move(m_extra_upload_jobs);
+
+	std::vector<PrintHostJob> ready_extra_jobs;
+	ready_extra_jobs.reserve(extra_jobs.size());
+	for (PrintHostJob &extra_job : extra_jobs) {
+		extra_job.upload_data.upload_path = m_upload_job.upload_data.upload_path;
+		extra_job.upload_data.use_3mf     = m_upload_job.upload_data.use_3mf;
+
+		boost::filesystem::path extra_source = boost::filesystem::temp_directory_path()
+			/ boost::filesystem::unique_path("." SLIC3R_APP_KEY ".upload.%%%%-%%%%-%%%%-%%%%");
+
+		std::string error_message;
+		if (copy_file(source_path.string(), extra_source.string(), error_message) != SUCCESS) {
+			BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << boost::format(": failed to copy upload source for additional printer: %1%") % error_message;
+			// copy_file writes through a .tmp and does not clean it up when it fails
+			boost::system::error_code ec;
+			boost::filesystem::remove(extra_source.string() + ".tmp", ec);
+			// the operator confirmed this printer as a target, so say that it was dropped
+			const std::string dropped = extra_job.upload_data.extended("printerDisplayName",
+			                                                          extra_job.printhost->get_host());
+			GUI::wxGetApp().CallAfter([dropped]() {
+				GUI::show_error(nullptr, GUI::format(_L("Could not prepare the file for %1%. It was not sent."), dropped));
+			});
+			continue;
+		}
+
+		extra_job.upload_data.source_path = std::move(extra_source);
+		ready_extra_jobs.emplace_back(std::move(extra_job));
+	}
+
+	// the primary target starts first
 	GUI::wxGetApp().printhost_job_queue().enqueue(std::move(m_upload_job));
+	for (PrintHostJob &extra_job : ready_extra_jobs) {
+		GUI::wxGetApp().printhost_job_queue().enqueue(std::move(extra_job));
+	}
 }
 // Executed by the background thread, to start a task on the UI thread.
 ThumbnailsList BackgroundSlicingProcess::render_thumbnails(const ThumbnailsParams &params)

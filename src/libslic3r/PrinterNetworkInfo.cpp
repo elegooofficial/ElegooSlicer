@@ -297,6 +297,7 @@ nlohmann::json convertPrintFilamentMmsMappingToJson(const PrintFilamentMmsMappin
     json["filamentDensity"]   = printFilamentMmsMapping.filamentDensity;
     json["index"]             = printFilamentMmsMapping.index;
     json["mappedMmsFilament"] = convertPrinterMmsTrayToJson(printFilamentMmsMapping.mappedMmsFilament);
+    json["materialOverride"]  = printFilamentMmsMapping.materialOverride;
     return json;
 }
 
@@ -310,6 +311,7 @@ PrintFilamentMmsMapping convertJsonToPrintFilamentMmsMapping(const nlohmann::jso
         printFilamentMmsMapping.filamentAlias = JsonUtils::safeGetString(json, "filamentAlias", "");
         printFilamentMmsMapping.filamentColor = JsonUtils::safeGetString(json, "filamentColor", "");
         printFilamentMmsMapping.filamentType = JsonUtils::safeGetString(json, "filamentType", "");
+        printFilamentMmsMapping.materialOverride = JsonUtils::safeGetBool(json, "materialOverride", false);
         printFilamentMmsMapping.filamentWeight = JsonUtils::safeGetDouble(json, "filamentWeight", 0.0);
         printFilamentMmsMapping.filamentDensity = JsonUtils::safeGetDouble(json, "filamentDensity", 0.0);
         printFilamentMmsMapping.index = JsonUtils::safeGetInt(json, "index", 0);
@@ -610,6 +612,7 @@ nlohmann::json convertPrinterNetworkParamsToJson(const PrinterNetworkParams& par
     json["timeLapse"] = params.timeLapse;
     json["heatedBedLeveling"] = params.heatedBedLeveling;
     json["autoRefill"] = params.autoRefill;
+    json["autoRefillSet"] = params.autoRefillSet;
     json["uploadAndStartPrint"] = params.uploadAndStartPrint;
     json["hasMms"] = params.hasMms;
     nlohmann::json mappingList = nlohmann::json::array();
@@ -630,6 +633,7 @@ PrinterNetworkParams convertJsonToPrinterNetworkParams(const nlohmann::json& jso
     params.timeLapse = JsonUtils::safeGetBool(json, "timeLapse", false);
     params.heatedBedLeveling = JsonUtils::safeGetBool(json, "heatedBedLeveling", false);
     params.autoRefill = JsonUtils::safeGetBool(json, "autoRefill", false);
+    params.autoRefillSet = JsonUtils::safeGetBool(json, "autoRefillSet", false);
     params.uploadAndStartPrint = JsonUtils::safeGetBool(json, "uploadAndStartPrint", false);
     params.hasMms = JsonUtils::safeGetBool(json, "hasMms", false);
     if (json.contains("filamentMmsMappingList") && json["filamentMmsMappingList"].is_array()) {

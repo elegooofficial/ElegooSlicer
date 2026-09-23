@@ -1297,11 +1297,16 @@ void PrintHostQueueDialog::append_job(const PrintHostJob &job)
 {
     wxCHECK_RET(!job.empty(), "PrintHostQueueDialog: Attempt to append an empty job");
 
+    // Elegoo: hosts that manage a device list route several printers through one host
+    // string, so prefer the device name when the job names one.
+    const std::string device_name = job.upload_data.extended("printerDisplayName");
+    const std::string host_label  = device_name.empty() ? job.printhost->get_host() : device_name;
+
     wxVector<wxVariant> fields;
     fields.push_back(wxVariant(wxString::Format("%d", job_list->GetItemCount() + 1)));
     fields.push_back(wxVariant(0));
     fields.push_back(wxVariant(_L("Queued")));
-    fields.push_back(wxVariant(job.printhost->get_host()));
+    fields.push_back(wxVariant(from_u8(host_label)));
     boost::system::error_code ec;
     boost::uintmax_t size_i = boost::filesystem::file_size(job.upload_data.source_path, ec);
     std::stringstream stream;
@@ -1316,9 +1321,9 @@ void PrintHostQueueDialog::append_job(const PrintHostJob &job)
     fields.push_back(wxVariant(""));
     job_list->AppendItem(fields, static_cast<wxUIntPtr>(ST_NEW));
     // Both strings are UTF-8 encoded.
-    upload_names.emplace_back(job.printhost->get_host(), job.upload_data.upload_path.string());
+    upload_names.emplace_back(host_label, job.upload_data.upload_path.string());
 
-    wxGetApp().notification_manager()->push_upload_job_notification(job_list->GetItemCount(), (float)size_i / 1024 / 1024, job.upload_data.upload_path.string(), job.printhost->get_host());
+    wxGetApp().notification_manager()->push_upload_job_notification(job_list->GetItemCount(), (float)size_i / 1024 / 1024, job.upload_data.upload_path.string(), host_label);
 }
 
 void PrintHostQueueDialog::on_dpi_changed(const wxRect &suggested_rect)

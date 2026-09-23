@@ -319,7 +319,12 @@ void PrintHostJobQueue::priv::bg_thread_main()
                 % job.cancelled;
 
             if (! job.cancelled) {
-                perform_job(std::move(job));
+                // do not let one failing job take the queue thread down with the jobs behind it
+                try {
+                    perform_job(std::move(job));
+                } catch (const std::exception &e) {
+                    emit_error(e.what());
+                }
             }
 
             remove_source();
@@ -436,6 +441,10 @@ void PrintHostJobQueue::priv::perform_job(PrintHostJob the_job)
     emit_progress(0);   // Indicate the upload is starting
     bool success = false;
     std::string selectedPrinterId = "";
+    // Read before the upload: the non-Elegoo branch moves upload_data. Every target opens
+    // its own page, but only the printer the operator chose is brought to the front,
+    // otherwise focus lands on whichever upload finished last.
+    const bool focusPrinterTab = the_job.upload_data.extended("primaryTarget") != "false";
     DynamicPrintConfig cfg = wxGetApp().preset_bundle->printers.get_edited_preset().config;
     if (PrintHost::support_device_list_management(cfg)) {
         PrinterNetworkParams params;
@@ -456,6 +465,7 @@ void PrintHostJobQueue::priv::perform_job(PrintHostJob the_job)
         }
         if(the_job.upload_data.extended_info.find("autoRefill") != the_job.upload_data.extended_info.end()) {
             params.autoRefill = the_job.upload_data.extended_info["autoRefill"] == "true";
+            params.autoRefillSet = true;
         }
         if(the_job.upload_data.extended_info.find("hasMms") != the_job.upload_data.extended_info.end()) {
             params.hasMms = the_job.upload_data.extended_info["hasMms"] == "true";
@@ -495,7 +505,7 @@ void PrintHostJobQueue::priv::perform_job(PrintHostJob the_job)
         emit_progress(100);
         if (the_job.switch_to_device_tab) {
             const auto mainframe = GUI::wxGetApp().mainframe;
-            mainframe->request_select_tab(MainFrame::TabPosition::tpMonitor, selectedPrinterId);
+            mainframe->request_select_tab(MainFrame::TabPosition::tpMonitor, selectedPrinterId, focusPrinterTab);
         }
     }
 }
