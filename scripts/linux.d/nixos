@@ -1,0 +1,22 @@
+#!/bin/bash
+# NixOS stand-in for build_linux.sh's system-dependency check.
+#
+# On NixOS, dev packages are provided via ../shell.nix (nix-shell) instead of
+# being installed system-wide with a package manager. This script exists only
+# to satisfy build_linux.sh's distro-detection gate; it performs no
+# installation and simply confirms the expected tools/libs are already on
+# PATH/pkg-config from the nix-shell environment.
+
+if [[ -n "$UPDATE_LIB" ]]
+then
+    echo "NixOS: system dependencies are managed via ../shell.nix (nix-shell), not apt/dpkg."
+    echo "Nothing to install here; make sure you are inside 'nix-shell ../shell.nix'."
+    exit 0
+fi
+
+export FOUND_GTK3_DEV
+if pkg-config --exists gtk+-3.0 2>/dev/null; then
+    FOUND_GTK3_DEV="gtk+-3.0 found via pkg-config (nix-shell)"
+else
+    FOUND_GTK3_DEV=""
+fi
