@@ -8389,6 +8389,14 @@ msgstr ""
 msgid "Set the action that dragging the right mouse button should perform."
 msgstr ""
 
+msgid "Enable thumb wheel pan"
+msgstr ""
+
+msgid ""
+"If enabled, the horizontal (thumb) mouse wheel pans the view sideways "
+"instead of zooming."
+msgstr ""
+
 msgid "Clear my choice on..."
 msgstr ""
 

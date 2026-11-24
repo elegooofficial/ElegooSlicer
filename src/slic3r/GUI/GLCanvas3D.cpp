@@ -4049,6 +4049,22 @@ void GLCanvas3D::on_mouse_wheel(wxMouseEvent& evt)
         }
         return;
     }
+
+    if (evt.GetWheelAxis() == wxMOUSE_WHEEL_HORIZONTAL && wxGetApp().app_config->get_bool("thumb_wheel_pan")) {
+        // 40 px of pan per wheel notch
+        double dx = -40.0 * (double)evt.GetWheelRotation() / (double)evt.GetWheelDelta();
+#if ENABLE_RETINA_GL
+        dx *= scale;
+#endif
+        float z = 0.0f;
+        const Vec3d p2 = _mouse_to_3d({ evt.GetX(), evt.GetY() }, &z);
+        const Vec3d p1 = _mouse_to_3d({ (double)evt.GetX() - dx, (double)evt.GetY() }, &z);
+        Camera& camera = wxGetApp().plater()->get_camera();
+        camera.set_target(camera.get_target() + p1 - p2);
+        m_dirty = true;
+        return;
+    }
+
     // Calculate the zoom delta and apply it to the current zoom factor
     double direction_factor = wxGetApp().app_config->get_bool("reverse_mouse_wheel_zoom") ? -1.0 : 1.0;
     auto delta = direction_factor * (double)evt.GetWheelRotation() / (double)evt.GetWheelDelta();
