@@ -8654,6 +8654,14 @@ msgstr "鼠标右键拖动"
 msgid "Set the action that dragging the right mouse button should perform."
 msgstr "设置拖动鼠标右键时应执行的操作。"
 
+msgid "Enable thumb wheel pan"
+msgstr "启用拇指滚轮平移"
+
+msgid ""
+"If enabled, the horizontal (thumb) mouse wheel pans the view sideways "
+"instead of zooming."
+msgstr "如果启用，鼠标的水平（拇指）滚轮会横向平移视图，而不是缩放。"
+
 msgid "Clear my choice on..."
 msgstr "清除我的选择..."
 

@@ -1733,6 +1733,8 @@ void PreferencesDialog::create_items()
     g_sizer->Add(item_middle_mouse_drag);
     auto item_right_mouse_drag  = create_item_combobox(_L("Right Mouse Drag"), _L("Set the action that dragging the right mouse button should perform."), "right_mouse_drag_action", ButtonDragActions);
     g_sizer->Add(item_right_mouse_drag);
+    auto item_thumb_wheel_pan = create_item_checkbox(_L("Enable thumb wheel pan"), _L("If enabled, the horizontal (thumb) mouse wheel pans the view sideways instead of zooming."), "thumb_wheel_pan");
+    g_sizer->Add(item_thumb_wheel_pan);
 
     //// CONTROL > Clear my choice on ...
     g_sizer->Add(create_item_title(_L("Clear my choice on...")), 1, wxEXPAND);

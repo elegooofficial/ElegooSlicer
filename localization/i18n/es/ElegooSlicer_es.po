@@ -9207,6 +9207,16 @@ msgstr ""
 "Establece la acción que se debe realizar al arrastrar el botón derecho del "
 "ratón."
 
+msgid "Enable thumb wheel pan"
+msgstr "Activar desplazamiento con la rueda lateral"
+
+msgid ""
+"If enabled, the horizontal (thumb) mouse wheel pans the view sideways "
+"instead of zooming."
+msgstr ""
+"Si se activa, la rueda horizontal del ratón (la del pulgar) desplaza la "
+"vista hacia los lados en lugar de hacer zoom."
+
 msgid "Clear my choice on..."
 msgstr "Limpiar mi elección en..."
 
